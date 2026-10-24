@@ -42,6 +42,15 @@ CREATE TABLE IF NOT EXISTS hitl (
     detail TEXT,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS payments (
+    payment_link_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    amount_inr REAL NOT NULL,
+    url TEXT NOT NULL,
+    status TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -127,6 +136,37 @@ def update_hitl(hid: str, status: str, call_uuid: str | None = None, detail: str
     with _db() as c:
         c.execute("UPDATE hitl SET status=?, call_uuid=COALESCE(?, call_uuid), detail=COALESCE(?, detail), "
                   "updated_at=? WHERE id=?", (status, call_uuid, detail, _now(), hid))
+
+
+def save_payment(link_id: str, session_id: str, amount_inr: float, url: str, status: str) -> None:
+    with _db() as c:
+        c.execute("INSERT OR REPLACE INTO payments (payment_link_id, created_at, session_id, amount_inr, url, "
+                  "status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  (link_id, _now(), session_id, amount_inr, url, status, _now()))
+
+
+def update_payment_status(link_id: str, status: str) -> None:
+    with _db() as c:
+        c.execute("UPDATE payments SET status=?, updated_at=? WHERE payment_link_id=?", (status, _now(), link_id))
+
+
+def get_payment(link_id: str) -> dict | None:
+    with _db() as c:
+        row = c.execute("SELECT * FROM payments WHERE payment_link_id=?", (link_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def payment_for_session(session_id: str) -> dict | None:
+    with _db() as c:
+        row = c.execute("SELECT * FROM payments WHERE session_id=? ORDER BY created_at DESC LIMIT 1",
+                        (session_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def hitl_approved_for_session(session_id: str) -> bool:
+    with _db() as c:
+        row = c.execute("SELECT 1 FROM hitl WHERE session_id=? AND status='APPROVED' LIMIT 1", (session_id,)).fetchone()
+    return row is not None
 
 
 def get_hitl(hid: str) -> dict | None:

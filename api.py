@@ -17,15 +17,17 @@
 from __future__ import annotations
 
 import os
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel, Field
 from render import RenderAsync
 
 import greptile_hw  # noqa: F401 - loads .env for local dev
+import pinelabs
 import store
 import vobiz
 import voice
@@ -76,6 +78,8 @@ async def config() -> dict:
         "voice_enabled": bool(os.getenv("ELEVENLABS_API_KEY")),
         "vobiz_call_threshold_inr": VOBIZ_CALL_THRESHOLD_INR,
         "pinelabs_checkout_url": os.getenv("PINELABS_CHECKOUT_URL", ""),
+        "pinelabs_enabled": pinelabs.configured(),
+        "pinelabs_test_mode": "uat" in pinelabs._base(),
     }
 
 
@@ -171,6 +175,67 @@ async def hitl_status(hid: str) -> dict:
         raise HTTPException(status_code=404, detail="Unknown HITL request")
     h.pop("phone_last4", None)
     return h
+
+
+# --- Pine Labs checkout -----------------------------------------------------
+
+class CheckoutRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=64)
+
+
+@app.post("/api/checkout")
+async def checkout(req: CheckoutRequest) -> dict:
+    """Create (or reuse) a Pine Labs payment link for an approved design.
+    The amount comes from the stored result, never from the browser."""
+    result = store.get_session_result(req.session_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Unknown design session")
+    posture = str(result.get("grantex_posture", ""))
+    if not (posture.startswith("APPROVED") or store.hitl_approved_for_session(req.session_id)):
+        raise HTTPException(status_code=403, detail=f"Checkout blocked by Grantex ({posture})")
+    total = result.get("total_inr")
+    if not isinstance(total, (int, float)) or total < 1:
+        raise HTTPException(status_code=409, detail="This design has no priced BOM total")
+
+    existing = store.payment_for_session(req.session_id)
+    if existing and existing["status"] in ("CREATED", "PROCESSED", "PAID"):
+        return {**existing, "payment_link": existing["url"], "test_mode": "uat" in pinelabs._base()}
+    base = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+    try:
+        link = await pinelabs.create_payment_link(
+            total, reference=f"sq-{req.session_id}-{uuid.uuid4().hex[:6]}",
+            description=f"Schemattiq BOM: {(result.get('design') or {}).get('mcu') or 'hardware kit'}",
+            callback_url=f"{base}/pay/return" if base else None,
+        )
+    except pinelabs.PineLabsError as e:
+        raise HTTPException(status_code=502, detail=str(e)) from e
+    store.save_payment(link["payment_link_id"], req.session_id, total, link["payment_link"], link.get("status", "CREATED"))
+    return {"payment_link_id": link["payment_link_id"], "payment_link": link["payment_link"],
+            "status": link.get("status", "CREATED"), "amount_inr": total, "test_mode": "uat" in pinelabs._base()}
+
+
+@app.get("/api/checkout/{payment_link_id}")
+async def checkout_status(payment_link_id: str) -> dict:
+    p = store.get_payment(payment_link_id)
+    if not p:
+        raise HTTPException(status_code=404, detail="Unknown payment link")
+    try:
+        link = await pinelabs.get_payment_link(payment_link_id)
+        store.update_payment_status(payment_link_id, link.get("status", p["status"]))
+        p["status"] = link.get("status", p["status"])
+    except pinelabs.PineLabsError as e:
+        p["detail"] = str(e)
+    return p
+
+
+@app.get("/pay/return")
+async def pay_return() -> HTMLResponse:
+    return HTMLResponse(
+        "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"
+        "<title>Schemattiq payment</title><body style='font:16px system-ui;background:#0b0d12;color:#e6e9f0;"
+        "display:grid;place-items:center;min-height:100vh;margin:0'><div style='text-align:center;padding:16px'>"
+        "<h1>Payment submitted</h1><p>You can close this tab and return to Schemattiq — the BOM tab "
+        "shows the confirmed status.</p></div>")
 
 
 # --- Vobiz webhooks ---------------------------------------------------------

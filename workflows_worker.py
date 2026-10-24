@@ -116,6 +116,39 @@ def _extract_firmware(spec: dict) -> str:
     return FALLBACK_FIRMWARE
 
 
+_BUS_SIGNAL = re.compile(r"SDA|SCL|I2C|MOSI|MISO|SCK|SCLK|CLK|ONE_?WIRE|1WIRE", re.I)
+
+
+def _is_mcu_board(name: str, mcu: str | None) -> bool:
+    n = (name or "").lower()
+    return bool(mcu and n and (n in mcu.lower() or mcu.lower().startswith(n))) or (
+        "esp32" in n and any(w in n for w in ("board", "devkit", "module", "wroom", "wrover")))
+
+
+def _pin_checks(spec: dict) -> list[dict]:
+    """One row per peripheral pin with ESP32 safety warnings. The MCU board's
+    own rows are dropped (they repeat the peripherals' pins), and a GPIO used
+    by two different non-bus signals is flagged as a conflict."""
+    rows = []
+    for comp in spec.get("components") or []:
+        if not isinstance(comp, dict) or _is_mcu_board(comp.get("name", ""), spec.get("mcu")):
+            continue
+        pins = comp.get("pin_mapping")
+        if not isinstance(pins, dict):
+            continue
+        for signal, gpio in greptile_hw._parse_pins(pins).items():
+            rows.append({"component": comp.get("name"), "signal": signal, "gpio": gpio,
+                         "warning": greptile_hw.check_pin(signal, gpio)})
+    users: dict[int, set] = {}
+    for r in rows:
+        if not _BUS_SIGNAL.search(r["signal"]):
+            users.setdefault(r["gpio"], set()).add(f"{r['component']}.{r['signal']}")
+    for r in rows:
+        if not r["warning"] and len(users.get(r["gpio"], ())) > 1:
+            r["warning"] = f"GPIO{r['gpio']} is shared by: {', '.join(sorted(users[r['gpio']]))}"
+    return rows
+
+
 def _is_hdl(code: str) -> bool:
     return bool(re.search(r"^\s*module\s+\w+", code, re.M) and "endmodule" in code)
 
@@ -231,6 +264,7 @@ async def schemattiq_pipeline(ctx: TaskContext, idea: str, budget_inr: int, phon
         "components": spec.get("components", []),
         "mermaid_wiring_diagram": spec.get("mermaid_wiring_diagram"),
         "firmware_code": _extract_firmware(spec),
+        "pin_checks": _pin_checks(spec),
     }
     if arch.status in PAUSED_STATUSES and not spec.get("mcu"):
         return paused(arch, "Rohan_Firmware_Lead", "design_hardware_spec")

@@ -34,7 +34,8 @@ api.py → Vobiz POST /Account/{id}/Call/ → /vobiz/answer (Speak + Gather) →
 | `greptile_hw.py` | Greptile query + ESP32 GPIO safety checks |
 | `voice.py` | ElevenLabs TTS (`eleven_flash_v2_5`) and STT (Scribe) |
 | `vobiz.py` | Vobiz outbound call + VobizXML |
-| `store.py` | SQLite log of sessions and HITL approvals |
+| `pinelabs.py` | Pine Labs Online Pay by Link (UAT by default) for approved BOMs |
+| `store.py` | SQLite log of sessions, HITL approvals and payment links |
 | `frontend/index.html` | Single-screen studio (no build step) |
 | `sandbox_stubs/` | Arduino/Wire/SPI stub headers for `g++ -fsyntax-only` |
 | `agenticorg_setup/` | Org chart CSV, agent prompts, setup check script |
@@ -48,6 +49,8 @@ api.py → Vobiz POST /Account/{id}/Call/ → /vobiz/answer (Speak + Gather) →
 | POST | `/api/transcribe` | multipart `audio` → `{text}` |
 | POST | `/api/hitl/simulate` | `{phone}` → ₹15,400 drone BOM, Grantex block + Vobiz call |
 | GET | `/api/hitl/{id}` | `HITL_REQUIRED` · `CALLING` · `APPROVED` · `REJECTED` · `NO_ANSWER` · `CALL_FAILED` |
+| POST | `/api/checkout` | `{session_id}` → Pine Labs payment link; only for approved designs, amount from the server |
+| GET | `/api/checkout/{payment_link_id}` | Payment link status from Pine Labs |
 | GET | `/api/stats`, `/api/sessions` | Live counters and the session log (demo proof) |
 | GET | `/api/config`, `/health` | |
 

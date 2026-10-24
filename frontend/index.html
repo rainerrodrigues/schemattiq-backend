@@ -166,6 +166,7 @@
         <div><span class="muted">Grantex policy</span> <span class="chip" id="bomPosture"></span></div>
         <a class="btn" id="checkout" href="#" target="_blank" rel="noopener">Proceed to Pine Labs checkout</a>
       </div>
+      <p class="muted" id="payStatus" role="status" aria-live="polite"></p>
     </div>
     <div class="panel" data-panel="trace">
       <ol class="trace" id="trace"></ol>
@@ -225,18 +226,18 @@ async function loadConfig() {
   if (config.voice_enabled === false) $("mic").classList.add("hidden");
 }
 
-// --- progress animation while the workflow runs ---------------------------
+// --- progress while the workflow runs ---------------------------------------
+// The workflow reports only at the end, so show the stages without claiming
+// which one is done; the real per-step results appear in the trace tab.
 const STEPS = ["Greptile: grounding pinouts", "Rohan_Firmware_Lead: designing circuit + firmware",
   "Render Sandbox: compiling firmware", "Meera_BOM_Buyer: pricing Indian BOM", "Priya_CFO_Guard: Grantex spend gate"];
 let stepTimer;
 function startProgress() {
   $("progress").classList.add("on");
-  $("steps").innerHTML = STEPS.map((s) => `<div class="step"><span class="ic"></span>${esc(s)}</div>`).join("");
-  const els = [...$("steps").children]; let i = 0;
-  els[0].classList.add("active");
-  stepTimer = setInterval(() => {
-    if (i < els.length - 1) { els[i].classList.replace("active", "done"); els[++i].classList.add("active"); }
-  }, 9000);
+  const t0 = Date.now();
+  $("steps").innerHTML = `<div class="step active"><span class="ic"></span><span id="elapsed">Running the pipeline…</span></div>` +
+    STEPS.map((s, i) => `<div class="step"><span class="ic" style="border-style:dashed"></span>${i + 1}. ${esc(s)}</div>`).join("");
+  stepTimer = setInterval(() => { $("elapsed").textContent = `Running the pipeline… ${Math.round((Date.now() - t0) / 1000)}s`; }, 1000);
 }
 function stopProgress() { clearInterval(stepTimer); $("progress").classList.remove("on"); }
 
@@ -257,6 +258,7 @@ async function design() {
     render(last);
     setStatus("");
     if (last.hitl) showHitl(last.hitl);
+    else if (last.result.grantex_posture === "HITL_PENDING_IN_AGENTICORG") showHeld(last.result);
     refreshStats();
   } catch (e) {
     setStatus("Design failed: " + e.message, true);
@@ -274,27 +276,44 @@ function postureChip(el, posture) {
 
 function render({ result }) {
   const d = result.design || {}, sb = result.sandbox_verification || {}, bom = result.bom || {};
-  $("resMcu").textContent = d.mcu ? `MCU: ${d.mcu}` : "";
-  $("resTotal").textContent = `${inr(result.total_inr)} of ${inr(result.budget_inr)} budget`;
+  const comps = Array.isArray(d.components) ? d.components : [];
+  // Rohan's own estimate, used until Meera has priced the BOM.
+  const estimate = comps.reduce((s, c) => s + (typeof c.est_inr === "number" ? c.est_inr * (c.qty ?? 1) : 0), 0);
+  const mcu = String(d.mcu || "");
+  const mcuShort = mcu.split(/[;(]/)[0].trim();
+  $("resMcu").textContent = mcu ? `MCU: ${mcuShort.length > 70 ? mcuShort.slice(0, 70) + "…" : mcuShort}` : "";
+  $("resMcu").title = mcu;
+  $("resTotal").textContent = typeof result.total_inr === "number"
+    ? `${inr(result.total_inr)} of ${inr(result.budget_inr)} budget`
+    : estimate ? `≈ ${inr(estimate)} estimated of ${inr(result.budget_inr)} budget` : `— of ${inr(result.budget_inr)} budget`;
   postureChip($("resPosture"), result.grantex_posture);
   postureChip($("bomPosture"), result.grantex_posture);
 
   // Wiring
   const box = $("diagram");
   if (d.mermaid_wiring_diagram) {
-    const src = String(d.mermaid_wiring_diagram).replace(/^```(?:mermaid)?\s*|```\s*$/g, "");
+    const src = String(d.mermaid_wiring_diagram).replace(/^```(?:mermaid)?\s*|```\s*$/g, "")
+      .replace(/\\n/g, "<br/>");  // agents write literal "\n" inside node labels
     mermaid.render("wiring" + Date.now(), src).then(({ svg }) => { box.innerHTML = svg; })
       .catch(() => { box.innerHTML = `<pre>${esc(src)}</pre>`; });
   } else box.innerHTML = `<p class="muted" style="color:#555">No wiring diagram returned.</p>`;
-  const comps = Array.isArray(d.components) ? d.components : [];
-  const rows = comps.flatMap((c) => {
-    const pm = c.pin_mapping;
-    if (pm && typeof pm === "object") return Object.entries(pm).map(([sig, pin]) => [c.name, sig, pin]);
-    return [[c.name, "", pm ?? ""]];
-  });
-  $("pinTable").innerHTML = rows.length
-    ? `<tr><th>Component</th><th>Signal</th><th>GPIO</th></tr>` + rows.map((r) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td></tr>`).join("")
-    : `<tr><td class="muted">No pin mapping returned.</td></tr>`;
+  if (Array.isArray(d.pin_checks)) {
+    // Backend-checked rows: MCU board duplicates removed, ESP32 pin rules applied.
+    $("pinTable").innerHTML = d.pin_checks.length
+      ? `<tr><th>Component</th><th>Signal</th><th>GPIO</th><th>Pin check</th></tr>` + d.pin_checks.map((r) =>
+          `<tr><td>${esc(r.component)}</td><td>${esc(r.signal)}</td><td>${esc(r.gpio)}</td><td>${r.warning
+            ? `<span class="chip warn" style="white-space:normal">⚠ ${esc(r.warning)}</span>` : `<span class="chip ok">✓ safe</span>`}</td></tr>`).join("")
+      : `<tr><td class="muted">No pin mapping returned.</td></tr>`;
+  } else {
+    const rows = comps.flatMap((c) => {
+      const pm = c.pin_mapping;
+      if (pm && typeof pm === "object") return Object.entries(pm).map(([sig, pin]) => [c.name, sig, pin]);
+      return [[c.name, "", pm ?? ""]];
+    });
+    $("pinTable").innerHTML = rows.length
+      ? `<tr><th>Component</th><th>Signal</th><th>GPIO</th></tr>` + rows.map((r) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td></tr>`).join("")
+      : `<tr><td class="muted">No pin mapping returned.</td></tr>`;
+  }
 
   // Firmware
   const fw = $("fwBadge");
@@ -311,12 +330,12 @@ function render({ result }) {
       items.map((it) => {
         const unit = it.unit_inr ?? it.est_inr, qty = it.qty ?? 1;
         return `<tr><td>${esc(it.name)}</td><td>${esc([it.vendor, it.sku].filter(Boolean).join(" · ") || "—")}</td><td>${esc(it.hsn || "—")}</td><td>${esc(qty)}</td><td class="num">${inr(unit)}</td><td class="num">${typeof unit === "number" ? inr(unit * qty) : "—"}</td></tr>`;
-      }).join("") + `<tr><td colspan="5"><b>Total (GST incl.)</b></td><td class="num"><b>${inr(result.total_inr)}</b></td></tr>`
+      }).join("") + (typeof result.total_inr === "number"
+        ? `<tr><td colspan="5"><b>Total (GST incl.)</b></td><td class="num"><b>${inr(result.total_inr)}</b></td></tr>`
+        : `<tr><td colspan="5"><b>Rohan's estimate</b> <span class="muted">— not yet priced by Meera</span></td><td class="num"><b>${estimate ? "≈ " + inr(estimate) : "—"}</b></td></tr>`)
     : `<tr><td class="muted">No BOM returned.</td></tr>`;
-  const approved = String(result.grantex_posture).startsWith("APPROVED");
-  const co = $("checkout");
-  if (approved && config.pinelabs_checkout_url) { co.href = config.pinelabs_checkout_url; co.removeAttribute("aria-disabled"); co.style.opacity = 1; co.textContent = "Proceed to Pine Labs checkout"; }
-  else { co.removeAttribute("href"); co.setAttribute("aria-disabled", "true"); co.style.opacity = .5; co.textContent = approved ? "Checkout link not configured" : "Checkout blocked by Grantex"; }
+  setCheckout(String(result.grantex_posture).startsWith("APPROVED"));
+  $("payStatus").textContent = "";
 
   // Trace
   $("trace").innerHTML = (result.trace || []).map((t, i) =>
@@ -324,6 +343,49 @@ function render({ result }) {
 
   $("result").classList.add("on");
   $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// --- Pine Labs checkout ----------------------------------------------------
+let checkoutAllowed = false, payTimer;
+function setCheckout(allowed) {
+  checkoutAllowed = allowed;
+  const co = $("checkout");
+  const live = allowed && (config.pinelabs_enabled || config.pinelabs_checkout_url);
+  co.setAttribute("aria-disabled", live ? "false" : "true");
+  co.style.opacity = live ? 1 : .5;
+  co.href = !config.pinelabs_enabled && live ? config.pinelabs_checkout_url : "#";
+  co.textContent = !allowed ? "Checkout blocked by Grantex"
+    : live ? `Pay with Pine Labs${config.pinelabs_test_mode ? " (test mode)" : ""}` : "Checkout not configured";
+}
+$("checkout").addEventListener("click", async (e) => {
+  if (!checkoutAllowed || !config.pinelabs_enabled) { if ($("checkout").getAttribute("aria-disabled") === "true") e.preventDefault(); return; }
+  e.preventDefault();
+  const tab = window.open("", "_blank");  // open now so the popup isn't blocked after the await
+  $("payStatus").textContent = "Creating a Pine Labs payment link…";
+  try {
+    const p = await (await api("/api/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: last.session_id }) })).json();
+    if (tab) tab.location = p.payment_link; else window.location = p.payment_link;
+    const mode = p.test_mode ? " — test mode, no real money" : "";
+    $("payStatus").textContent = `Payment link for ${inr(p.amount_inr)} opened (status: ${p.status})${mode}.`;
+    clearInterval(payTimer);
+    payTimer = setInterval(async () => {
+      try {
+        const s = await (await api(`/api/checkout/${encodeURIComponent(p.payment_link_id)}`)).json();
+        $("payStatus").textContent = `Pine Labs payment ${inr(s.amount_inr)}: ${s.status}${mode}.`;
+        if (!["CREATED", "PENDING", "PROCESSING"].includes(s.status)) clearInterval(payTimer);
+      } catch {}
+    }, 5000);
+  } catch (err) {
+    if (tab) tab.close();
+    $("payStatus").textContent = "Checkout failed: " + err.message;
+  }
+});
+
+function showHeld(result) {
+  const box = $("hitlBox"); box.classList.remove("hidden");
+  box.innerHTML = `<b>Held for approval in AgenticOrg</b><div>${esc(result.hitl_trigger || "The agent's run needs human review.")}` +
+    `${result.agenticorg_run_id ? ` · run <code>${esc(result.agenticorg_run_id)}</code>` : ""}. ` +
+    `The design is shown for review; nothing is priced or bought until it's approved in the AgenticOrg dashboard.</div>`;
 }
 
 $("copyFw").addEventListener("click", async () => {
@@ -394,6 +456,8 @@ function showHitl(h) {
     NO_ANSWER: "No answer. Checkout stays blocked.",
   }[h.status] || h.status;
   box.innerHTML = `<b>Grantex: ${esc(h.status.replaceAll("_", " "))}</b><div>${esc(msg)}${h.status === "CALL_FAILED" ? esc(h.detail || "") : ""}</div>`;
+  // A phone approval for the design on screen unlocks its checkout (the backend re-checks).
+  if (h.status === "APPROVED" && last && h.session_id === last.session_id) setCheckout(true);
   clearInterval(hitlTimer);
   if (["CALLING", "HITL_REQUIRED"].includes(h.status)) {
     hitlTimer = setInterval(async () => {

@@ -22,7 +22,10 @@ def main() -> int:
     if not base:
         print("AGENTICORG_BASE_URL not set; the SDK would default to app.agenticorg.ai")
     with AgenticOrg() as client:
-        agents = client.agents.list()
+        # agents.list() only returns the first page; ask for everything.
+        resp = client._http.get("/api/v1/agents", params={"per_page": 200})
+        resp.raise_for_status()
+        agents = resp.json().get("items", [])
     seen = {}
     for a in agents:
         for key in ("name", "agent_name", "display_name", "agent_type"):

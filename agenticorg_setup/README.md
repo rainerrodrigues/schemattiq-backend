@@ -1,6 +1,7 @@
 # AgenticOrg setup: Schemattiq Labs (Step 1)
 
-Done by hand in the dashboard at `agenticorg.hackathon.pinelabs.com`. The SDK has
+Done by hand in the AgenticOrg dashboard. API keys made at `app.agenticorg.ai` only work with
+`AGENTICORG_BASE_URL=https://app.agenticorg.ai`, so do every step on that site. The SDK has
 no org-import or prompt-config API.
 
 ## 1. Organization + API key
@@ -9,7 +10,7 @@ no org-import or prompt-config API.
 - Set on the Render Workflow (and in local `.env`):
   ```
   AGENTICORG_API_KEY=ao_sk_...
-  AGENTICORG_BASE_URL=https://agenticorg.hackathon.pinelabs.com
+  AGENTICORG_BASE_URL=https://app.agenticorg.ai
   AGENTICORG_COMPANY_ID=<company uuid>
   ```
 

@@ -388,7 +388,7 @@ function showHeld(result) {
   const box = $("hitlBox"); box.classList.remove("hidden");
   box.innerHTML = `<b>Held for approval in AgenticOrg</b><div>${esc(result.hitl_trigger || "The agent's run needs human review.")}` +
     `${result.agenticorg_run_id ? ` · run <code>${esc(result.agenticorg_run_id)}</code>` : ""}. ` +
-    `The design is shown for review; nothing is priced or bought until it's approved in the AgenticOrg dashboard.</div>`;
+    `Everything so far is shown for review; checkout stays blocked until the run is approved in the AgenticOrg dashboard.</div>`;
 }
 
 $("copyFw").addEventListener("click", async () => {

@@ -289,11 +289,15 @@ async def schemattiq_pipeline(ctx: TaskContext, idea: str, budget_inr: int, phon
     buyer_inputs = {"merchant_id": BOM_MERCHANT_ID, "design": spec, "max_budget_inr": budget_inr}
     commerce = await _run_agent(MEERA_AGENT, "buyer_discovery_preview", buyer_inputs,
                                 task=MEERA_TASK.format(budget=budget_inr, reason=""))
-    if commerce.status in PAUSED_STATUSES:
-        return paused(commerce, "Meera_BOM_Buyer", "buyer_discovery_preview",
-                      design=design, sandbox_verification=sandbox_check)
     cart = _agent_json(commerce.output)
     total = _total_inr(cart)
+    if commerce.status in PAUSED_STATUSES:
+        # Show Meera's priced cart for review; checkout stays blocked because
+        # the posture is not APPROVED until the run is approved in AgenticOrg.
+        result = paused(commerce, "Meera_BOM_Buyer", "buyer_discovery_preview",
+                        design=design, sandbox_verification=sandbox_check, bom=cart)
+        result["total_inr"] = total
+        return result
 
     # 5. Priya_CFO_Guard policy: over the cap -> back to Meera for cheaper
     #    drop-in swaps (MAX_REQUOTES times), then HITL. A missing total is

@@ -56,6 +56,8 @@ class DesignRequest(BaseModel):
 class SummaryRequest(BaseModel):
     session_id: str | None = None
     result: dict | None = None
+    # Speak this text as-is instead of summarising a design (handy for testing).
+    text: str | None = Field(default=None, min_length=1, max_length=600)
 
 
 class SimulateRequest(BaseModel):
@@ -129,10 +131,13 @@ async def design(req: DesignRequest) -> dict:
 
 @app.post("/api/voice-summary")
 async def voice_summary(req: SummaryRequest) -> Response:
-    result = req.result or (store.get_session_result(req.session_id) if req.session_id else None)
-    if not result:
-        raise HTTPException(status_code=404, detail="No result for that session")
-    text = voice.summary_text(result)
+    if req.text:
+        text = req.text.strip()
+    else:
+        result = req.result or (store.get_session_result(req.session_id) if req.session_id else None)
+        if not result:
+            raise HTTPException(status_code=404, detail="No result for that session")
+        text = voice.summary_text(result)
     try:
         audio = await voice.text_to_speech(text)
     except voice.VoiceError as e:

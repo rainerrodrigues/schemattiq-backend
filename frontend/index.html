@@ -154,7 +154,10 @@
       <div class="scroll"><table id="pinTable"></table></div>
     </div>
     <div class="panel" data-panel="firmware">
-      <p><span class="chip" id="fwBadge"></span> <span class="muted" id="fwNote"></span></p>
+      <div class="summary" style="margin-bottom:10px">
+        <p style="margin:0"><span class="chip" id="fwBadge"></span> <span class="muted" id="fwNote"></span></p>
+        <button class="btn secondary" id="copyFw" type="button">Copy code</button>
+      </div>
       <pre><code id="fwCode"></code></pre>
     </div>
     <div class="panel" data-panel="bom">
@@ -322,6 +325,21 @@ function render({ result }) {
   $("result").classList.add("on");
   $("result").scrollIntoView({ behavior: "smooth", block: "start" });
 }
+
+$("copyFw").addEventListener("click", async () => {
+  const code = $("fwCode").textContent, btn = $("copyFw");
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+  } catch {
+    // Older browsers / non-HTTPS: select the text so the user can copy it.
+    const range = document.createRange(); range.selectNodeContents($("fwCode"));
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    btn.textContent = "Press Ctrl+C"; setTimeout(() => (btn.textContent = "Copy code"), 2500);
+    return;
+  }
+  btn.textContent = "✓ Copied"; setTimeout(() => (btn.textContent = "Copy code"), 1800);
+});
 
 document.querySelector(".tabs").addEventListener("click", (e) => {
   const t = e.target.closest(".tab"); if (!t) return;

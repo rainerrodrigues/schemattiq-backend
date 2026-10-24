@@ -16,9 +16,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
+import re
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -88,9 +92,60 @@ async def stats() -> dict:
     return store.stats()
 
 
+def _require_admin(request: Request) -> None:
+    expected = os.getenv("ADMIN_TOKEN", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="ADMIN_TOKEN is not set on the server")
+    given = request.headers.get("X-Admin-Token", "")
+    if not hmac.compare_digest(given.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail="Wrong or missing admin token")
+
+
 @app.get("/api/sessions")
-async def sessions(limit: int = 50) -> list[dict]:
+async def sessions(request: Request, limit: int = 50) -> list[dict]:
+    # Contains what people typed, so it's admin-only.
+    _require_admin(request)
     return store.recent_sessions(min(limit, 200))
+
+
+class TrackRequest(BaseModel):
+    client_id: str | None = Field(default=None, max_length=64)
+    source: str | None = Field(default=None, max_length=100)
+    referrer: str | None = Field(default=None, max_length=500)
+
+
+def _visit_source(req: TrackRequest, request: Request) -> str:
+    tag = re.sub(r"[^a-z0-9_.-]", "", (req.source or "").lower())[:40]
+    if tag:
+        return tag
+    host = (urlparse(req.referrer or "").hostname or "").removeprefix("www.")
+    own = {request.url.hostname, "localhost", "127.0.0.1"}
+    return host if host and host not in own else "direct"
+
+
+@app.post("/api/track", status_code=204)
+async def track(req: TrackRequest, request: Request) -> Response:
+    """Anonymous page-view log: browser ID, traffic source, device type and a
+    salted hash of the IP (the raw IP is never stored)."""
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    ip = forwarded.split(",")[0].strip() or (request.client.host if request.client else "")
+    salt = os.getenv("ANALYTICS_SALT") or os.getenv("ADMIN_TOKEN") or "schemattiq"
+    ip_hash = hashlib.sha256(f"{salt}:{ip}".encode()).hexdigest()[:16] if ip else None
+    ua = request.headers.get("User-Agent", "")
+    device = "mobile" if re.search(r"Mobi|Android|iPhone|iPad", ua) else "desktop"
+    store.log_visit(req.client_id, _visit_source(req, request), device, ip_hash)
+    return Response(status_code=204)
+
+
+@app.get("/api/admin/usage")
+async def admin_usage(request: Request) -> dict:
+    _require_admin(request)
+    return store.usage()
+
+
+@app.get("/admin")
+async def admin_page() -> FileResponse:
+    return FileResponse(FRONTEND.with_name("admin.html"))
 
 
 async def _start_hitl_call(title: str, total: float, budget: float, phone: str,

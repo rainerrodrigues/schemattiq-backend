@@ -11,7 +11,7 @@ import os
 import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 DB_PATH = os.getenv("DB_PATH", "schemattiq.db")
 
@@ -42,6 +42,15 @@ CREATE TABLE IF NOT EXISTS hitl (
     detail TEXT,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS visits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    client_id TEXT,
+    source TEXT,                     -- ?src= / utm_source tag, else referrer host, else "direct"
+    device TEXT,                     -- mobile | desktop
+    ip_hash TEXT                     -- salted one-way hash; raw IPs are never stored
+);
+CREATE INDEX IF NOT EXISTS visits_created ON visits(created_at);
 CREATE TABLE IF NOT EXISTS payments (
     payment_link_id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL,
@@ -136,6 +145,48 @@ def update_hitl(hid: str, status: str, call_uuid: str | None = None, detail: str
     with _db() as c:
         c.execute("UPDATE hitl SET status=?, call_uuid=COALESCE(?, call_uuid), detail=COALESCE(?, detail), "
                   "updated_at=? WHERE id=?", (status, call_uuid, detail, _now(), hid))
+
+
+def log_visit(client_id: str | None, source: str, device: str, ip_hash: str | None) -> None:
+    with _db() as c:
+        c.execute("INSERT INTO visits (created_at, client_id, source, device, ip_hash) VALUES (?, ?, ?, ?, ?)",
+                  (_now(), client_id, source, device, ip_hash))
+
+
+def usage() -> dict:
+    """Everything the /admin dashboard shows."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(timespec="seconds")
+    # A visitor is a browser ID, or the IP hash for browsers that block storage.
+    who = "COALESCE(client_id, ip_hash)"
+    with _db() as c:
+        one = lambda sql, *a: c.execute(sql, a).fetchone()[0] or 0  # noqa: E731
+        out = {
+            "visitors_total": one(f"SELECT COUNT(DISTINCT {who}) FROM visits"),
+            "visitors_today": one(f"SELECT COUNT(DISTINCT {who}) FROM visits WHERE created_at >= ?", today),
+            "page_views_total": one("SELECT COUNT(*) FROM visits"),
+            "page_views_today": one("SELECT COUNT(*) FROM visits WHERE created_at >= ?", today),
+            "designs_total": one("SELECT COUNT(*) FROM sessions"),
+            "designs_today": one("SELECT COUNT(*) FROM sessions WHERE created_at >= ?", today),
+            "designers_total": one("SELECT COUNT(DISTINCT client_id) FROM sessions"),
+            "designs_failed": one("SELECT COUNT(*) FROM sessions WHERE status = 'failed'"),
+            "approval_calls": one("SELECT COUNT(*) FROM hitl WHERE status != 'HITL_REQUIRED'"),
+            "payments": one("SELECT COUNT(*) FROM payments"),
+            "first_visit_at": c.execute("SELECT MIN(created_at) FROM visits").fetchone()[0],
+        }
+        out["sources"] = [dict(r) for r in c.execute(
+            f"SELECT source, COUNT(DISTINCT {who}) AS visitors, COUNT(*) AS views FROM visits "
+            "GROUP BY source ORDER BY visitors DESC LIMIT 15")]
+        out["devices"] = [dict(r) for r in c.execute(
+            f"SELECT device, COUNT(DISTINCT {who}) AS visitors FROM visits GROUP BY device ORDER BY visitors DESC")]
+        out["hourly"] = [dict(r) for r in c.execute(
+            f"SELECT substr(created_at, 1, 13) AS hour, COUNT(DISTINCT {who}) AS visitors, COUNT(*) AS views "
+            "FROM visits WHERE created_at >= ? GROUP BY hour ORDER BY hour", (since,))]
+        out["postures"] = [dict(r) for r in c.execute(
+            "SELECT COALESCE(grantex_posture, status) AS posture, COUNT(*) AS n FROM sessions "
+            "GROUP BY posture ORDER BY n DESC")]
+    out["recent_designs"] = recent_sessions(25)
+    return out
 
 
 def save_payment(link_id: str, session_id: str, amount_inr: float, url: str, status: str) -> None:

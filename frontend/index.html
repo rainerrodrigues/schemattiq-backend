@@ -173,7 +173,8 @@
     </div>
   </section>
 
-  <footer>Schemattiq · AgenticOrg · Greptile · Render Workflows &amp; Sandboxes · ElevenLabs · Vobiz · Replit</footer>
+  <footer>Schemattiq · AgenticOrg · Greptile · Render Workflows &amp; Sandboxes · ElevenLabs · Vobiz · Replit
+    <br>We count visits anonymously (a random browser ID, traffic source, device type and a scrambled IP) and keep the ideas you submit to improve the demo.</footer>
 </div>
 
 <script type="module">
@@ -478,7 +479,16 @@ $("simulate").addEventListener("click", async () => {
   finally { $("simulate").disabled = false; }
 });
 
-loadConfig(); refreshStats(); setInterval(refreshStats, 30000);
+// Anonymous page-view log for the /admin dashboard. Tag shared links with ?src=qr etc.
+function trackVisit() {
+  const q = new URLSearchParams(location.search);
+  fetch(API + "/api/track", {
+    method: "POST", headers: { "Content-Type": "application/json" }, keepalive: true,
+    body: JSON.stringify({ client_id: clientId, source: q.get("src") || q.get("utm_source") || "", referrer: document.referrer || "" }),
+  }).catch(() => {});
+}
+
+trackVisit(); loadConfig(); refreshStats(); setInterval(refreshStats, 30000);
 </script>
 </body>
 </html>

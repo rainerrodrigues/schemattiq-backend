@@ -51,7 +51,9 @@ api.py → Vobiz POST /Account/{id}/Call/ → /vobiz/answer (Speak + Gather) →
 | GET | `/api/hitl/{id}` | `HITL_REQUIRED` · `CALLING` · `APPROVED` · `REJECTED` · `NO_ANSWER` · `CALL_FAILED` |
 | POST | `/api/checkout` | `{session_id}` → Pine Labs payment link; only for approved designs, amount from the server |
 | GET | `/api/checkout/{payment_link_id}` | Payment link status from Pine Labs |
-| GET | `/api/stats`, `/api/sessions` | Live counters and the session log (demo proof) |
+| POST | `/api/track` | Anonymous page view `{client_id, source, referrer}` (sent by the page on load) |
+| GET | `/api/stats` | Public "verified today" counter |
+| GET | `/admin` | Usage dashboard; `/api/admin/usage` and `/api/sessions` need header `X-Admin-Token: $ADMIN_TOKEN` |
 | GET | `/api/config`, `/health` | |
 
 ## Deploy
@@ -70,6 +72,13 @@ api.py → Vobiz POST /Account/{id}/Call/ → /vobiz/answer (Speak + Gather) →
    - Optionally set `CORS_ORIGINS` on the Render web service to your Replit URL instead of `*`.
 
    The Render web service also serves the same page at `/`, as a fallback.
+
+## Usage tracking
+
+Open `/admin` and enter `ADMIN_TOKEN`. It shows visitors, page views, designs, traffic sources,
+devices and recent designs. Tag the links you share so the dashboard can tell them apart, e.g.
+`https://schemattiq-backend.onrender.com/?src=qr` or `?src=whatsapp`. Raw IPs are never stored (only a salted hash).
+Data lives in SQLite at `DB_PATH`; without a persistent disk it resets on every deploy.
 
 ## Local dev
 

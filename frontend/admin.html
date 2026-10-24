@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Schemattiq Usage</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0d12; --panel: #12151d; --panel-2: #181c26; --line: #252a37;
+    --text: #e6e9f0; --muted: #8b93a7; --accent: #5b8cff; --ok: #2fbf71; --warn: #f0a531; --bad: #ef5b5b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 Inter, system-ui, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; } h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }
+  .muted { color: var(--muted); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .tile, .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .tile .v { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .tile .l { color: var(--muted); font-size: 12px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .card { overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .scroll { overflow-x: auto; }
+  .chart { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 140px; padding-top: 8px; border-bottom: 1px solid var(--line); }
+  .bar { flex: 1; min-width: 6px; background: var(--accent); border-radius: 4px 4px 0 0; position: relative; }
+  .bar:hover, .bar:focus { filter: brightness(1.25); outline: none; }
+  .tip { position: absolute; pointer-events: none; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 12px; white-space: nowrap; transform: translate(-50%, -110%); display: none; z-index: 2; }
+  .axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: var(--panel-2); color: var(--muted); }
+  .chip.ok { background: rgba(47,191,113,.15); color: var(--ok); } .chip.warn { background: rgba(240,165,49,.15); color: var(--warn); } .chip.bad { background: rgba(239,91,91,.15); color: var(--bad); }
+  input, button { font: inherit; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); padding: 8px 10px; }
+  button { cursor: pointer; background: var(--accent); border: 0; color: #fff; font-weight: 600; }
+  #login { max-width: 420px; margin: 60px auto; }
+  .err { color: var(--bad); }
+  details summary { cursor: pointer; color: var(--muted); margin-top: 8px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="login" class="card">
+    <h1>Schemattiq usage</h1>
+    <p class="muted">Enter the admin token (the <code>ADMIN_TOKEN</code> set on the Render web service).</p>
+    <form id="loginForm" style="display:flex;gap:8px">
+      <input id="token" type="password" placeholder="Admin token" autocomplete="current-password" style="flex:1" required>
+      <button>Open</button>
+    </form>
+    <p class="err" id="loginErr"></p>
+  </div>
+
+  <div id="dash" hidden>
+    <header>
+      <h1>Schemattiq usage</h1>
+      <span class="muted" id="updated"></span>
+    </header>
+    <div class="tiles" id="tiles"></div>
+
+    <div class="card" style="margin-bottom:12px">
+      <h2>Visitors per hour (last 24 h, UTC)</h2>
+      <div class="chart" id="chart" role="img" aria-label="Visitors per hour"></div>
+      <div class="axis"><span id="axisStart"></span><span id="axisEnd"></span></div>
+      <div class="tip" id="tip"></div>
+      <details><summary>Show as table</summary><div class="scroll"><table id="hourTable"></table></div></details>
+    </div>
+
+    <div class="grid">
+      <div class="card"><h2>Where visitors came from</h2><table id="sources"></table>
+        <p class="muted" style="font-size:12px;margin:8px 0 0">Tag shared links with <code>?src=…</code> — e.g. <code>/?src=qr</code>, <code>/?src=whatsapp</code>.</p></div>
+      <div class="card"><h2>Devices &amp; design outcomes</h2><table id="devices"></table><table id="postures" style="margin-top:12px"></table></div>
+    </div>
+
+    <div class="card">
+      <h2>Recent designs</h2>
+      <div class="scroll"><table id="recent"></table></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = (window.SCHEMATTIQ_API || "").replace(/\/$/, "");
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const num = (n) => Number(n || 0).toLocaleString("en-IN");
+const inr = (n) => typeof n === "number" ? "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 }) : "—";
+const time = (iso) => iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+let token = "", timer;
+try { token = sessionStorage.getItem("sq_admin") || ""; } catch {}
+
+async function load() {
+  const r = await fetch(API + "/api/admin/usage", { headers: { "X-Admin-Token": token } });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    throw new Error(d.detail || r.statusText);
+  }
+  render(await r.json());
+}
+
+function render(u) {
+  $("login").hidden = true; $("dash").hidden = false;
+  $("updated").textContent = `Updated ${new Date().toLocaleTimeString()} · refreshes every 15 s`;
+  const tiles = [
+    [u.visitors_today, "Visitors today"], [u.visitors_total, "Visitors (all time)"],
+    [u.page_views_today, "Page views today"], [u.designs_today, "Designs today"],
+    [u.designers_total, "People who designed"], [u.designs_total, "Designs (all time)"],
+    [u.approval_calls, "Approval calls"], [u.payments, "Payment links"],
+  ];
+  $("tiles").innerHTML = tiles.map(([v, l]) => `<div class="tile"><div class="v">${num(v)}</div><div class="l">${l}</div></div>`).join("");
+
+  // Hourly bars: fill every hour of the last 24 so gaps show as zero.
+  const byHour = Object.fromEntries((u.hourly || []).map((h) => [h.hour, h]));
+  const hours = [];
+  for (let i = 23; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 3600e3);
+    const key = d.toISOString().slice(0, 13);
+    hours.push({ key, label: key.slice(11) + ":00", visitors: byHour[key]?.visitors || 0, views: byHour[key]?.views || 0 });
+  }
+  const max = Math.max(1, ...hours.map((h) => h.visitors));
+  $("chart").innerHTML = hours.map((h, i) =>
+    `<div class="bar" tabindex="0" data-i="${i}" style="height:${h.visitors ? Math.max(3, (h.visitors / max) * 100) : 0}%"></div>`).join("");
+  $("axisStart").textContent = hours[0].label; $("axisEnd").textContent = hours[23].label;
+  const tip = $("tip");
+  const show = (e) => {
+    const b = e.target.closest(".bar"); if (!b) return;
+    const h = hours[+b.dataset.i], box = $("chart").getBoundingClientRect(), r = b.getBoundingClientRect();
+    tip.innerHTML = `<b>${h.label} UTC</b><br>${num(h.visitors)} visitors · ${num(h.views)} views`;
+    tip.style.left = (r.left - box.left + r.width / 2) + "px"; tip.style.top = (r.top - box.top + 8) + "px"; tip.style.display = "block";
+  };
+  $("chart").onmouseover = show; $("chart").onfocusin = show;
+  $("chart").onmouseleave = () => (tip.style.display = "none"); $("chart").onfocusout = () => (tip.style.display = "none");
+  $("hourTable").innerHTML = `<tr><th>Hour (UTC)</th><th class="n">Visitors</th><th class="n">Views</th></tr>` +
+    hours.filter((h) => h.views).map((h) => `<tr><td>${h.label}</td><td class="n">${num(h.visitors)}</td><td class="n">${num(h.views)}</td></tr>`).join("");
+
+  const table = (rows, cols) => rows.length
+    ? `<tr>${cols.map(([, l, n]) => `<th${n ? ' class="n"' : ""}>${l}</th>`).join("")}</tr>` +
+      rows.map((r) => `<tr>${cols.map(([k, , n]) => `<td${n ? ' class="n"' : ""}>${n ? num(r[k]) : esc(r[k])}</td>`).join("")}</tr>`).join("")
+    : `<tr><td class="muted">No data yet.</td></tr>`;
+  $("sources").innerHTML = table(u.sources || [], [["source", "Source"], ["visitors", "Visitors", 1], ["views", "Views", 1]]);
+  $("devices").innerHTML = table(u.devices || [], [["device", "Device"], ["visitors", "Visitors", 1]]);
+  $("postures").innerHTML = table(u.postures || [], [["posture", "Design outcome"], ["n", "Designs", 1]]);
+
+  const chip = (p) => {
+    const s = String(p || "");
+    return `<span class="chip ${s.startsWith("APPROVED") ? "ok" : s.startsWith("HITL") ? "warn" : s === "failed" ? "bad" : ""}">${esc(s.replaceAll("_", " ") || "—")}</span>`;
+  };
+  $("recent").innerHTML = (u.recent_designs || []).length
+    ? `<tr><th>Time</th><th>Idea</th><th class="n">Budget</th><th class="n">Total</th><th>Outcome</th></tr>` +
+      u.recent_designs.map((s) => `<tr><td>${time(s.created_at)}</td><td>${esc(String(s.idea).slice(0, 90))}</td>` +
+        `<td class="n">${inr(s.budget_inr)}</td><td class="n">${inr(s.total_inr)}</td><td>${chip(s.grantex_posture || s.status)}</td></tr>`).join("")
+    : `<tr><td class="muted">No designs yet.</td></tr>`;
+}
+
+async function start() {
+  try {
+    await load();
+    clearInterval(timer); timer = setInterval(() => load().catch(() => {}), 15000);
+  } catch (e) {
+    $("login").hidden = false; $("dash").hidden = true;
+    $("loginErr").textContent = token ? e.message : "";
+  }
+}
+$("loginForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  token = $("token").value.trim();
+  try { sessionStorage.setItem("sq_admin", token); } catch {}
+  start();
+});
+if (token) start();
+</script>
+</body>
+</html>

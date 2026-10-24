@@ -276,7 +276,9 @@ function postureChip(el, posture) {
 
 function render({ result }) {
   const d = result.design || {}, sb = result.sandbox_verification || {}, bom = result.bom || {};
-  const comps = Array.isArray(d.components) ? d.components : [];
+  // Agents sometimes append a "Total"/"Estimated total" row as if it were a part; drop it.
+  const comps = (Array.isArray(d.components) ? d.components : [])
+    .filter((c) => !/^\s*(estimated\s+)?(grand\s+|sub\s*)?total\b/i.test(String(c?.name ?? "")));
   // Rohan's own estimate, used until Meera has priced the BOM.
   const estimate = comps.reduce((s, c) => s + (typeof c.est_inr === "number" ? c.est_inr * (c.qty ?? 1) : 0), 0);
   const mcu = String(d.mcu || "");

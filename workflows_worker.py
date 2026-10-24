@@ -46,7 +46,8 @@ ROHAN_TASK = (
     "Reply with ONLY a JSON object: {{\"mcu\": str, \"components\": [{{\"name\": str, \"qty\": int, "
     "\"est_inr\": number, \"pin_mapping\": {{\"<signal>\": <gpio int>}}}}], \"mermaid_wiring_diagram\": "
     "str (Mermaid flowchart, no code fences), \"firmware_code\": str (compilable ESP32 Arduino C++)}}. "
-    "Never assign conflicting GPIOs or strapping pins."
+    "Never assign conflicting GPIOs or strapping pins. List only real parts in `components` "
+    "(no total or subtotal rows)."
 )
 MEERA_TASK = (
     "Act as a supply-chain buyer for Indian electronics (Robu.in, Element14, SP Road prices). Price every "

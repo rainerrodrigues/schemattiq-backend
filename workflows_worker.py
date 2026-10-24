@@ -38,6 +38,24 @@ STUBS_DIR = Path(__file__).parent / "sandbox_stubs"
 FALLBACK_FIRMWARE = "void setup() {}\nvoid loop() {}\n"
 
 
+# Output contracts sent in each run's `task`, so a built-in chat-style agent
+# (e.g. solution_architect_agent, ecommerce_buyer) can stand in for Rohan/Meera.
+ROHAN_TASK = (
+    "Act as a Senior Mechatronics & Embedded Architect. Design the circuit and ESP32 firmware for: {idea}. "
+    "Budget: ₹{budget}. Respect these pin rules and headers:\n{context}\n"
+    "Reply with ONLY a JSON object: {{\"mcu\": str, \"components\": [{{\"name\": str, \"qty\": int, "
+    "\"est_inr\": number, \"pin_mapping\": {{\"<signal>\": <gpio int>}}}}], \"mermaid_wiring_diagram\": "
+    "str (Mermaid flowchart, no code fences), \"firmware_code\": str (compilable ESP32 Arduino C++)}}. "
+    "Never assign conflicting GPIOs or strapping pins."
+)
+MEERA_TASK = (
+    "Act as a supply-chain buyer for Indian electronics (Robu.in, Element14, SP Road prices). Price every "
+    "component in `design.components` with an Indian SKU and GST HSN code (8542/8544 etc.); budget ₹{budget}. "
+    "{reason}Reply with ONLY a JSON object: {{\"total_inr\": number (GST-inclusive), \"line_items\": "
+    "[{{\"name\": str, \"sku\": str, \"vendor\": str, \"qty\": int, \"unit_inr\": number, \"hsn\": str}}], "
+    "\"swaps\": [{{\"from\": str, \"to\": str, \"saving_inr\": number}}]}}."
+)
+
 # Run statuses that pause the pipeline instead of producing output.
 PAUSED_STATUSES = {
     "hitl_triggered": "HITL_PENDING_IN_AGENTICORG",  # waits for approval in the AgenticOrg UI
@@ -201,7 +219,7 @@ async def schemattiq_pipeline(ctx: TaskContext, idea: str, budget_inr: int, phon
     # 2. Rohan: firmware + circuit architecture.
     arch = await _run_agent(ROHAN_AGENT, "design_hardware_spec", {
         "prompt": idea, "greptile_context": hw_context, "budget_inr": budget_inr,
-    }, task=f"Design the circuit and ESP32 firmware for: {idea}. Budget: ₹{budget_inr}.")
+    }, task=ROHAN_TASK.format(idea=idea, budget=budget_inr, context=hw_context))
     if arch.status in PAUSED_STATUSES:
         return paused(arch, "Rohan_Firmware_Lead", "design_hardware_spec")
     trace.append({"agent": "Rohan_Firmware_Lead", "step": "design_hardware_spec", "status": arch.status})
@@ -220,8 +238,8 @@ async def schemattiq_pipeline(ctx: TaskContext, idea: str, budget_inr: int, phon
 
     # 4. Meera: OACP buyer discovery for the BOM.
     buyer_inputs = {"merchant_id": BOM_MERCHANT_ID, "design": spec, "max_budget_inr": budget_inr}
-    buyer_task = f"Price this BOM with Indian vendors and GST HSN codes; budget ₹{budget_inr}."
-    commerce = await _run_agent(MEERA_AGENT, "buyer_discovery_preview", buyer_inputs, task=buyer_task)
+    commerce = await _run_agent(MEERA_AGENT, "buyer_discovery_preview", buyer_inputs,
+                                task=MEERA_TASK.format(budget=budget_inr, reason=""))
     if commerce.status in PAUSED_STATUSES:
         return paused(commerce, "Meera_BOM_Buyer", "buyer_discovery_preview",
                       design=design, sandbox_verification=sandbox_check)
@@ -240,7 +258,7 @@ async def schemattiq_pipeline(ctx: TaskContext, idea: str, budget_inr: int, phon
                   "drop-in parts with the same pin mapping and interface.")
         commerce = await _run_agent(MEERA_AGENT, "buyer_discovery_preview", {
             **buyer_inputs, "previous_cart": cart, "requote_reason": reason,
-        }, task=f"{buyer_task} {reason}")
+        }, task=MEERA_TASK.format(budget=budget_inr, reason=reason + " List each swap in `swaps`. "))
         if commerce.status in PAUSED_STATUSES:
             return paused(commerce, "Meera_BOM_Buyer", "buyer_discovery_preview (re-quote)",
                           design=design, sandbox_verification=sandbox_check, requotes=requotes)

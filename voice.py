@@ -8,8 +8,9 @@ import os
 import httpx
 
 ELEVEN_BASE = "https://api.elevenlabs.io/v1"
-# "Rachel", a stock voice available on every account; override with your own.
-DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8mRAgk"
+# "Alice - Clear, Engaging Educator", one of ElevenLabs' premade voices; override
+# with ELEVENLABS_VOICE_ID (GET /v1/voices lists the ones your account has).
+DEFAULT_VOICE_ID = "Xb7hH8MSUJpSbSDYk0k2"
 
 
 class VoiceError(RuntimeError):

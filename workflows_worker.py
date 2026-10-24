@@ -220,10 +220,6 @@ async def schemattiq_pipeline(ctx: TaskContext, idea: str, budget_inr: int, phon
     arch = await _run_agent(ROHAN_AGENT, "design_hardware_spec", {
         "prompt": idea, "greptile_context": hw_context, "budget_inr": budget_inr,
     }, task=ROHAN_TASK.format(idea=idea, budget=budget_inr, context=hw_context))
-    if arch.status in PAUSED_STATUSES:
-        return paused(arch, "Rohan_Firmware_Lead", "design_hardware_spec")
-    trace.append({"agent": "Rohan_Firmware_Lead", "step": "design_hardware_spec", "status": arch.status})
-
     spec = _agent_json(arch.output)
     design = {
         "mcu": spec.get("mcu"),
@@ -231,9 +227,22 @@ async def schemattiq_pipeline(ctx: TaskContext, idea: str, budget_inr: int, phon
         "mermaid_wiring_diagram": spec.get("mermaid_wiring_diagram"),
         "firmware_code": _extract_firmware(spec),
     }
+    if arch.status in PAUSED_STATUSES and not spec.get("mcu"):
+        return paused(arch, "Rohan_Firmware_Lead", "design_hardware_spec")
+    if arch.status not in PAUSED_STATUSES:
+        trace.append({"agent": "Rohan_Firmware_Lead", "step": "design_hardware_spec", "status": arch.status})
 
     # 3. Chained task on its own compute: compile-check in a Render Sandbox.
     sandbox_check = await ctx.run(verify_firmware_in_sandbox, _extract_firmware(spec))
+
+    # A design held for approval in AgenticOrg (e.g. confidence below the
+    # agent's floor) is shown and compile-checked, but nothing is bought.
+    if arch.status in PAUSED_STATUSES:
+        result = paused(arch, "Rohan_Firmware_Lead", "design_hardware_spec",
+                        design=design, sandbox_verification=sandbox_check)
+        trace.append({"agent": "Render Sandbox", "step": "firmware syntax check",
+                      "status": sandbox_check.get("status")})
+        return result
     trace.append({"agent": "Render Sandbox", "step": "firmware syntax check", "status": sandbox_check.get("status")})
 
     # 4. Meera: OACP buyer discovery for the BOM.

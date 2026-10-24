@@ -58,8 +58,9 @@ async def _access_token(http: httpx.AsyncClient) -> str:
 
 
 async def create_payment_link(amount_inr: float, reference: str, description: str,
-                              callback_url: str | None = None) -> dict:
-    """Returns Pine Labs' payment link object (payment_link, payment_link_id, status, ...)."""
+                              callback_url: str | None = None, mobile: str | None = None) -> dict:
+    """Returns Pine Labs' payment link object (payment_link, payment_link_id, status, ...).
+    With `mobile` (10-digit Indian number), Pine Labs sends the link to the customer."""
     if not configured():
         raise PineLabsError("Pine Labs is not configured (PINELABS_CLIENT_ID/SECRET)")
     body = {
@@ -71,6 +72,8 @@ async def create_payment_link(amount_inr: float, reference: str, description: st
     }
     if callback_url:
         body["callback_url"] = callback_url
+    if mobile:
+        body["customer"] = {"mobile_number": mobile, "country_code": "91"}
     async with httpx.AsyncClient(timeout=30) as http:
         token = await _access_token(http)
         r = await http.post(f"{_base()}/api/pay/v1/paymentlink",

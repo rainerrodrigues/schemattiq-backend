@@ -203,7 +203,7 @@
 
   <div class="hero">
     <div class="eyebrow">⚡ Multi-agent hardware studio</div>
-    <h1>Describe a gadget.<br><span class="grad">Get wiring, firmware &amp; a governed BOM.</span></h1>
+    <h1>Describe a gadget.<br><span class="grad">Get wiring, firmware &amp; a&nbsp;governed&nbsp;BOM.</span></h1>
     <p class="sub">A four-agent virtual hardware company designs the circuit, checks the firmware in a Render Sandbox, and prices Indian parts against your budget cap — with a human in the loop for every rupee over it.</p>
   </div>
 
@@ -492,28 +492,35 @@ function setCheckout(allowed) {
   co.textContent = !allowed ? "Checkout blocked by Grantex"
     : live ? `Pay with Pine Labs${config.pinelabs_test_mode ? " (test mode)" : ""}` : "Checkout not configured";
 }
-$("checkout").addEventListener("click", async (e) => {
-  if (!checkoutAllowed || !config.pinelabs_enabled) { if ($("checkout").getAttribute("aria-disabled") === "true") e.preventDefault(); return; }
-  e.preventDefault();
+// Create (or reuse) the Pine Labs link for a session, open it, and track its status.
+// With a phone number entered, Pine Labs also sends the link to that number.
+async function startCheckout(sessionId, statusEl) {
   const tab = window.open("", "_blank");  // open now so the popup isn't blocked after the await
-  $("payStatus").textContent = "Creating a Pine Labs payment link…";
+  statusEl.textContent = "Creating a Pine Labs payment link…";
   try {
-    const p = await (await api("/api/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: last.session_id }) })).json();
+    const p = await (await api("/api/checkout", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, phone: $("phone").value.trim() }) })).json();
     if (tab) tab.location = p.payment_link; else window.location = p.payment_link;
     const mode = p.test_mode ? " — test mode, no real money" : "";
-    $("payStatus").textContent = `Payment link for ${inr(p.amount_inr)} opened (status: ${p.status})${mode}.`;
+    const sent = p.sent_to_phone ? " Pine Labs is also sending it to the customer's number." : "";
+    statusEl.textContent = `Payment link for ${inr(p.amount_inr)} opened (status: ${p.status})${mode}.${sent}`;
     clearInterval(payTimer);
     payTimer = setInterval(async () => {
       try {
         const s = await (await api(`/api/checkout/${encodeURIComponent(p.payment_link_id)}`)).json();
-        $("payStatus").textContent = `Pine Labs payment ${inr(s.amount_inr)}: ${s.status}${mode}.`;
-        if (!["CREATED", "PENDING", "PROCESSING"].includes(s.status)) clearInterval(payTimer);
+        statusEl.textContent = `Pine Labs payment ${inr(s.amount_inr)}: ${String(s.status).replaceAll("_", " ")}${mode}.${sent}`;
+        if (!["CREATED", "CLICKED", "PAYMENT_INITIATED"].includes(s.status)) clearInterval(payTimer);
       } catch {}
     }, 5000);
   } catch (err) {
     if (tab) tab.close();
-    $("payStatus").textContent = "Checkout failed: " + err.message;
+    statusEl.textContent = "Checkout failed: " + err.message;
   }
+}
+$("checkout").addEventListener("click", (e) => {
+  if (!checkoutAllowed || !config.pinelabs_enabled) { if ($("checkout").getAttribute("aria-disabled") === "true") e.preventDefault(); return; }
+  e.preventDefault();
+  startCheckout(last.session_id, $("payStatus"));
 });
 
 function showHeld(result) {
@@ -586,13 +593,25 @@ function showHitl(h) {
     CALLING: "📞 Calling the approver now — press 1 on the call to approve the Grantex override.",
     HITL_REQUIRED: "Grantex blocked checkout. Add a phone number to approve by call — until then the purchase stays blocked.",
     CALL_FAILED: "Grantex blocked checkout. The approval call could not be placed: ",
-    APPROVED: "✅ Approved by phone (DTMF 1). Grantex override recorded — Pine Labs payment link released.",
+    APPROVED: config.pinelabs_enabled
+      ? "✅ Approved by phone (DTMF 1). Grantex override recorded — checkout is unlocked."
+      : "✅ Approved by phone (DTMF 1). Grantex override recorded. Checkout is unlocked, but Pine Labs isn't configured yet, so no payment link can be created.",
     REJECTED: "❌ Rejected by phone. Checkout stays blocked.",
     NO_ANSWER: "No answer. Checkout stays blocked.",
   }[h.status] || h.status;
   box.innerHTML = `<b>Grantex: ${esc(h.status.replaceAll("_", " "))}</b><div>${esc(msg)}${h.status === "CALL_FAILED" ? esc(h.detail || "") : ""}</div>`;
-  // A phone approval for the design on screen unlocks its checkout (the backend re-checks).
-  if (h.status === "APPROVED" && last && h.session_id === last.session_id) setCheckout(true);
+  if (h.status === "APPROVED" && h.session_id) {
+    // A phone approval for the design on screen unlocks its checkout (the backend re-checks).
+    if (last && h.session_id === last.session_id) setCheckout(true);
+    if (config.pinelabs_enabled) {
+      const phone = $("phone").value.trim();
+      box.insertAdjacentHTML("beforeend",
+        `<div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">` +
+        `<button class="btn" id="hitlPay" type="button">Pay ${inr(h.total_inr)} with Pine Labs${config.pinelabs_test_mode ? " (test mode)" : ""}</button>` +
+        `<span class="muted" id="hitlPayStatus">${phone ? `The link is also sent to ${esc(phone)}.` : "Add a phone number above to also send the link by SMS."}</span></div>`);
+      $("hitlPay").addEventListener("click", () => startCheckout(h.session_id, $("hitlPayStatus")));
+    }
+  }
   clearInterval(hitlTimer);
   if (["CALLING", "HITL_REQUIRED"].includes(h.status)) {
     hitlTimer = setInterval(async () => {
@@ -604,7 +623,7 @@ $("simulate").addEventListener("click", async () => {
   $("simulate").disabled = true;
   setStatus("Engineering requested a ₹15,400 drone BOM against a ₹10,000 policy…");
   try {
-    const r = await (await api("/api/hitl/simulate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone: $("phone").value.trim() }) })).json();
+    const r = await (await api("/api/hitl/simulate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone: $("phone").value.trim(), client_id: clientId }) })).json();
     setStatus("");
     showHitl(r.hitl);
   } catch (e) { setStatus("Simulation failed: " + e.message, true); }

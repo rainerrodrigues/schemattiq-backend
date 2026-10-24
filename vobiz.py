@@ -82,7 +82,7 @@ def answer_xml(hitl: dict, action_url: str) -> str:
 
 def result_xml(approved: bool | None) -> str:
     msg = {
-        True: "Approved. The Grantex override is recorded and the payment link is released. Goodbye.",
+        True: "Approved. The Grantex override is recorded and checkout is unlocked. Goodbye.",
         False: "Rejected. The purchase stays blocked. Goodbye.",
         None: "Invalid input. The request stays blocked. Goodbye.",
     }[approved]

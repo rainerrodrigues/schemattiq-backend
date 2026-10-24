@@ -68,6 +68,7 @@ class SummaryRequest(BaseModel):
 
 class SimulateRequest(BaseModel):
     phone: str = Field(default="", max_length=20)
+    client_id: str | None = Field(default=None, max_length=64)
 
 
 @app.get("/health")
@@ -218,9 +219,17 @@ async def transcribe(audio: UploadFile = File(...)) -> dict:
 
 @app.post("/api/hitl/simulate")
 async def simulate_hitl(req: SimulateRequest) -> dict:
-    """Demo: a ₹15,400 drone BOM against a ₹10,000 policy cap."""
-    hitl = await _start_hitl_call("drone", 15400, 10000, req.phone)
-    return {"grantex_posture": "HITL_REQUIRED", "checkout": "BLOCKED", "hitl": hitl}
+    """Demo: a ₹15,400 drone BOM against a ₹10,000 policy cap. It's logged as a
+    session so an approval by phone unlocks a real (test-mode) checkout for it."""
+    sid = store.start_session("[Simulation] ₹15,400 drone BOM", 10000, req.client_id)
+    store.finish_session(sid, {
+        "design": {"mcu": "Drone flight controller (simulated)"},
+        "total_inr": 15400, "budget_inr": 10000,
+        "grantex_posture": "HITL_ESCALATED_OVER_BUDGET", "hitl_required": True,
+        "sandbox_verification": {}, "trace": [],
+    })
+    hitl = await _start_hitl_call("drone", 15400, 10000, req.phone, sid)
+    return {"session_id": sid, "grantex_posture": "HITL_REQUIRED", "checkout": "BLOCKED", "hitl": hitl}
 
 
 @app.get("/api/hitl/{hid}")
@@ -236,6 +245,12 @@ async def hitl_status(hid: str) -> dict:
 
 class CheckoutRequest(BaseModel):
     session_id: str = Field(min_length=1, max_length=64)
+    # Optional: Pine Labs sends the payment link to this number.
+    phone: str = Field(default="", max_length=20)
+
+
+# Pine Labs link statuses that can still be paid (or already were).
+LIVE_LINK_STATUSES = ("CREATED", "CLICKED", "PAYMENT_INITIATED", "PROCESSED", "PARTIAL_PROCESSED")
 
 
 @app.post("/api/checkout")
@@ -253,20 +268,30 @@ async def checkout(req: CheckoutRequest) -> dict:
         raise HTTPException(status_code=409, detail="This design has no priced BOM total")
 
     existing = store.payment_for_session(req.session_id)
-    if existing and existing["status"] in ("CREATED", "PROCESSED", "PAID"):
-        return {**existing, "payment_link": existing["url"], "test_mode": "uat" in pinelabs._base()}
+    if existing and existing["status"] in LIVE_LINK_STATUSES:
+        return {**existing, "payment_link": existing["url"], "sent_to_phone": False,
+                "test_mode": "uat" in pinelabs._base()}
+    mobile = None
+    if req.phone:
+        try:
+            digits = vobiz.normalize_phone(req.phone)
+        except vobiz.VobizError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+        mobile = digits[2:] if digits.startswith("91") and len(digits) == 12 else None
     base = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
     try:
         link = await pinelabs.create_payment_link(
             total, reference=f"sq-{req.session_id}-{uuid.uuid4().hex[:6]}",
             description=f"Schemattiq BOM: {(result.get('design') or {}).get('mcu') or 'hardware kit'}",
             callback_url=f"{base}/pay/return" if base else None,
+            mobile=mobile,
         )
     except pinelabs.PineLabsError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     store.save_payment(link["payment_link_id"], req.session_id, total, link["payment_link"], link.get("status", "CREATED"))
     return {"payment_link_id": link["payment_link_id"], "payment_link": link["payment_link"],
-            "status": link.get("status", "CREATED"), "amount_inr": total, "test_mode": "uat" in pinelabs._base()}
+            "status": link.get("status", "CREATED"), "amount_inr": total, "sent_to_phone": bool(mobile),
+            "test_mode": "uat" in pinelabs._base()}
 
 
 @app.get("/api/checkout/{payment_link_id}")

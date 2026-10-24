@@ -298,7 +298,7 @@ function render({ result }) {
 
   // Firmware
   const fw = $("fwBadge");
-  const label = { ok: "✓ Compiled in Render Sandbox", missing_library: "Syntax OK up to a missing library", syntax_error: "✗ Compile errors", no_toolchain: "Toolchain unavailable" }[sb.status] || "Not verified";
+  const label = { ok: "✓ Compiled in Render Sandbox", missing_library: "Syntax OK up to a missing library", syntax_error: "✗ Compile errors", no_toolchain: "Toolchain unavailable", sandbox_unavailable: "Sandbox unavailable — not compile-checked" }[sb.status] || "Not verified";
   fw.textContent = label;
   fw.className = "chip " + (sb.status === "ok" ? "ok" : sb.status === "syntax_error" ? "bad" : "warn");
   $("fwNote").textContent = sb.missing_headers?.length ? `Needs: ${sb.missing_headers.join(", ")}` : (sb.sandbox_id ? `Sandbox ${sb.sandbox_id}` : "");

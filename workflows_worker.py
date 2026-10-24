@@ -141,7 +141,12 @@ async def verify_firmware_in_sandbox(ctx: TaskContext, firmware_code: str) -> di
     """
     hdl = _is_hdl(firmware_code)
     sandboxes = RenderAsync().experimental.sandboxes
-    sb = await sandboxes.create(timeout_seconds=300)
+    try:
+        sb = await sandboxes.create(timeout_seconds=300)
+    except Exception as e:  # noqa: BLE001 - e.g. Sandboxes not enabled on the workspace (404)
+        return {"sandbox_id": None, "language": "systemverilog" if hdl else "cpp", "verified": False,
+                "status": "sandbox_unavailable", "exit_code": None, "missing_headers": [],
+                "log": f"Could not create a Render Sandbox: {e}"[:2000]}
     try:
         # Upload as files instead of a heredoc so the code can't break the shell.
         with tempfile.TemporaryDirectory() as tmp:

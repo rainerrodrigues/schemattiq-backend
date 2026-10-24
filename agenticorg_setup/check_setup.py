@@ -24,6 +24,11 @@ def main() -> int:
     with AgenticOrg() as client:
         # agents.list() only returns the first page; ask for everything.
         resp = client._http.get("/api/v1/agents", params={"per_page": 200})
+        if resp.status_code == 401:
+            print("This key can't list agents here (the hackathon instance only lets keys run them).\n"
+                  "Copy each agent's UUID from /dashboard/agents/<uuid> in the AgenticOrg dashboard\n"
+                  "and set ROHAN_AGENT_ID / MEERA_AGENT_ID.")
+            return 1
         resp.raise_for_status()
         agents = resp.json().get("items", [])
     seen = {}

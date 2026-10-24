@@ -38,19 +38,32 @@ STUBS_DIR = Path(__file__).parent / "sandbox_stubs"
 FALLBACK_FIRMWARE = "void setup() {}\nvoid loop() {}\n"
 
 
+# Run statuses that pause the pipeline instead of producing output.
+PAUSED_STATUSES = {
+    "hitl_triggered": "HITL_PENDING_IN_AGENTICORG",  # waits for approval in the AgenticOrg UI
+    "budget_exceeded": "AGENTICORG_BUDGET_EXCEEDED",
+}
+
+
 def _ao_client() -> AgenticOrg:
-    return AgenticOrg(api_key=os.environ["AGENTICORG_API_KEY"])
+    # AGENTICORG_BASE_URL is read by the SDK; agent runs can take a while.
+    return AgenticOrg(api_key=os.environ["AGENTICORG_API_KEY"], timeout=120)
 
 
-async def _run_agent(agent: str, action: str, inputs: dict) -> AgentRunResult:
-    # The AgenticOrg SDK is synchronous; keep it off the event loop.
+async def _run_agent(agent: str, action: str, inputs: dict, task: str) -> AgentRunResult:
+    """Run an AgenticOrg agent (UUID preferred). `task` is a plain-language
+    version of the request, which chat-style agents read."""
     def call() -> AgentRunResult:
         with _ao_client() as client:
             return client.agents.run(
-                agent, action=action, inputs=inputs,
+                agent, action=action, inputs={"task": task, **inputs},
                 company_id=os.getenv("AGENTICORG_COMPANY_ID") or None,
             )
-    return await asyncio.to_thread(call)
+    # The AgenticOrg SDK is synchronous; keep it off the event loop.
+    result = await asyncio.to_thread(call)
+    if result.status == "failed":
+        raise RuntimeError(f"AgenticOrg agent {agent} failed: {result.error or 'no error message'}")
+    return result
 
 
 def _agent_summary(result: AgentRunResult) -> dict:
@@ -173,19 +186,45 @@ async def schemattiq_pipeline(ctx: TaskContext, idea: str, budget_inr: int, phon
                       "Avoid flash pins 6-11, strapping pins 0/2/5/12/15; 34-39 are input-only.")
         hw_source = f"fallback ({type(e).__name__}: {e})"[:300]
 
+    trace = [{"agent": "Greptile", "step": "hardware ground truth", "status": hw_source.split(" ")[0]}]
+
+    def paused(result: AgentRunResult, agent: str, step: str, **partial) -> dict:
+        # The agent run is waiting in AgenticOrg (HITL approval or budget);
+        # report that instead of continuing with an empty output.
+        posture = PAUSED_STATUSES[result.status]
+        trace.append({"agent": agent, "step": step, "status": result.status})
+        return {"hardware_context_source": hw_source, "budget_inr": budget_inr, "total_inr": None,
+                "grantex_posture": posture, "hitl_required": True,
+                "agenticorg_run_id": result.run_id, "hitl_trigger": result.hitl_trigger,
+                "trace": trace, **partial}
+
     # 2. Rohan: firmware + circuit architecture.
     arch = await _run_agent(ROHAN_AGENT, "design_hardware_spec", {
         "prompt": idea, "greptile_context": hw_context, "budget_inr": budget_inr,
-    })
+    }, task=f"Design the circuit and ESP32 firmware for: {idea}. Budget: ₹{budget_inr}.")
+    if arch.status in PAUSED_STATUSES:
+        return paused(arch, "Rohan_Firmware_Lead", "design_hardware_spec")
+    trace.append({"agent": "Rohan_Firmware_Lead", "step": "design_hardware_spec", "status": arch.status})
 
     spec = _agent_json(arch.output)
+    design = {
+        "mcu": spec.get("mcu"),
+        "components": spec.get("components", []),
+        "mermaid_wiring_diagram": spec.get("mermaid_wiring_diagram"),
+        "firmware_code": _extract_firmware(spec),
+    }
 
     # 3. Chained task on its own compute: compile-check in a Render Sandbox.
     sandbox_check = await ctx.run(verify_firmware_in_sandbox, _extract_firmware(spec))
+    trace.append({"agent": "Render Sandbox", "step": "firmware syntax check", "status": sandbox_check.get("status")})
 
     # 4. Meera: OACP buyer discovery for the BOM.
     buyer_inputs = {"merchant_id": BOM_MERCHANT_ID, "design": spec, "max_budget_inr": budget_inr}
-    commerce = await _run_agent(MEERA_AGENT, "buyer_discovery_preview", buyer_inputs)
+    buyer_task = f"Price this BOM with Indian vendors and GST HSN codes; budget ₹{budget_inr}."
+    commerce = await _run_agent(MEERA_AGENT, "buyer_discovery_preview", buyer_inputs, task=buyer_task)
+    if commerce.status in PAUSED_STATUSES:
+        return paused(commerce, "Meera_BOM_Buyer", "buyer_discovery_preview",
+                      design=design, sandbox_verification=sandbox_check)
     cart = _agent_json(commerce.output)
     total = _total_inr(cart)
 
@@ -195,12 +234,16 @@ async def schemattiq_pipeline(ctx: TaskContext, idea: str, budget_inr: int, phon
     requotes = []
     while total is not None and total > budget_inr and len(requotes) < MAX_REQUOTES:
         requotes.append({"total_inr": total, "cart": cart})
+        trace.append({"agent": "Meera_BOM_Buyer", "step": "buyer_discovery_preview",
+                      "status": "re-quote requested", "total_inr": total})
+        reason = (f"Over budget by ₹{total - budget_inr:.0f}. Swap to cheaper "
+                  "drop-in parts with the same pin mapping and interface.")
         commerce = await _run_agent(MEERA_AGENT, "buyer_discovery_preview", {
-            **buyer_inputs,
-            "previous_cart": cart,
-            "requote_reason": f"Over budget by ₹{total - budget_inr:.0f}. Swap to cheaper "
-                              "drop-in parts with the same pin mapping and interface.",
-        })
+            **buyer_inputs, "previous_cart": cart, "requote_reason": reason,
+        }, task=f"{buyer_task} {reason}")
+        if commerce.status in PAUSED_STATUSES:
+            return paused(commerce, "Meera_BOM_Buyer", "buyer_discovery_preview (re-quote)",
+                          design=design, sandbox_verification=sandbox_check, requotes=requotes)
         cart = _agent_json(commerce.output)
         total = _total_inr(cart)
 
@@ -214,14 +257,12 @@ async def schemattiq_pipeline(ctx: TaskContext, idea: str, budget_inr: int, phon
     # 6. The web service (api.py) places the Vobiz HITL call, since it also
     #    hosts the call's webhooks. `phone` stays unused here so numbers don't
     #    land in workflow logs.
+    trace.append({"agent": "Meera_BOM_Buyer", "step": "buyer_discovery_preview", "status": commerce.status,
+                  "total_inr": total})
+    trace.append({"agent": "Priya_CFO_Guard", "step": "Grantex spend gate", "status": grantex_status})
     return {
         "hardware_context_source": hw_source,
-        "design": {
-            "mcu": spec.get("mcu"),
-            "components": spec.get("components", []),
-            "mermaid_wiring_diagram": spec.get("mermaid_wiring_diagram"),
-            "firmware_code": _extract_firmware(spec),
-        },
+        "design": design,
         "architecture": _agent_summary(arch),
         "sandbox_verification": sandbox_check,
         "bom": cart,
@@ -231,16 +272,7 @@ async def schemattiq_pipeline(ctx: TaskContext, idea: str, budget_inr: int, phon
         "budget_inr": budget_inr,
         "grantex_posture": grantex_status,
         "hitl_required": grantex_status.startswith("HITL"),
-        "trace": [
-            {"agent": "Greptile", "step": "hardware ground truth", "status": hw_source.split(" ")[0]},
-            {"agent": "Rohan_Firmware_Lead", "step": "design_hardware_spec", "status": arch.status},
-            {"agent": "Render Sandbox", "step": "firmware syntax check", "status": sandbox_check.get("status")},
-            *({"agent": "Meera_BOM_Buyer", "step": "buyer_discovery_preview", "status": "re-quote requested",
-               "total_inr": q["total_inr"]} for q in requotes),
-            {"agent": "Meera_BOM_Buyer", "step": "buyer_discovery_preview", "status": commerce.status,
-             "total_inr": total},
-            {"agent": "Priya_CFO_Guard", "step": "Grantex spend gate", "status": grantex_status},
-        ],
+        "trace": trace,
     }
 
 

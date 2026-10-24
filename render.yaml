@@ -1,0 +1,19 @@
+# Blueprint for the web service. The Workflow (workflows_worker.py) is created
+# separately in the Render dashboard - see README.
+services:
+  - type: web
+    name: schemattiq-api
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: RENDER_API_KEY
+        sync: false
+      - key: PIPELINE_TASK_SLUG
+        value: schemattiq-workflow/schemattiq_pipeline
+      - key: CORS_ORIGINS
+        value: "*"

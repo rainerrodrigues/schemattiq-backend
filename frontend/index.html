@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schemattiq</title>
+<meta name="description" content="Governed multi-agent firmware, wiring and procurement studio">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+  // Replit: set this to your Render web service URL, e.g. "https://schemattiq-api.onrender.com".
+  // Leave empty when this page is served by the API itself.
+  window.SCHEMATTIQ_API = window.SCHEMATTIQ_API || "";
+</script>
+<style>
+  :root {
+    --bg: #0b0d12; --panel: #12151d; --panel-2: #181c26; --line: #252a37;
+    --text: #e6e9f0; --muted: #8b93a7; --accent: #5b8cff; --accent-2: #8f6bff;
+    --ok: #2fbf71; --warn: #f0a531; --bad: #ef5b5b;
+    --radius: 14px; --mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 Inter, system-ui, sans-serif; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 16px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 8px 0 20px; }
+  .brand { font-weight: 700; font-size: 22px; letter-spacing: -.02em; }
+  .brand span { background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); font-size: 13px; color: var(--muted); }
+  .badge b { color: var(--text); font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 4px rgba(47,191,113,.15); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+  h1 { font-size: clamp(22px, 4vw, 32px); line-height: 1.2; margin: 0 0 6px; letter-spacing: -.02em; }
+  .sub { color: var(--muted); margin: 0 0 18px; }
+  .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .pill { border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 999px; padding: 8px 14px; font: inherit; font-size: 13px; cursor: pointer; }
+  .pill:hover { border-color: var(--accent); }
+  .pill .cap { color: var(--muted); }
+  .pill.hitl .cap { color: var(--warn); }
+  textarea, input { width: 100%; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 12px; font: inherit; }
+  textarea { min-height: 96px; resize: vertical; }
+  textarea:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  .btn { display: inline-block; border: 0; border-radius: 10px; padding: 12px 18px; font: inherit; font-weight: 600; cursor: pointer; background: var(--accent); color: #fff; text-decoration: none; text-align: center; }
+  .btn.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); }
+  .btn.danger { background: transparent; color: var(--warn); border: 1px solid rgba(240,165,49,.5); }
+  .btn:disabled, .btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+  .mic.rec { background: var(--bad); color: #fff; }
+  .status { margin-top: 12px; color: var(--muted); font-size: 14px; min-height: 21px; }
+  .status.err { color: var(--bad); }
+  .progress { display: none; margin-top: 18px; }
+  .progress.on { display: block; }
+  .steps { display: grid; gap: 8px; }
+  .step { display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 14px; }
+  .step .ic { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); flex: none; }
+  .step.active { color: var(--text); }
+  .step.active .ic { border-color: var(--accent); border-top-color: transparent; animation: spin .8s linear infinite; }
+  .step.done .ic { background: var(--ok); border-color: var(--ok); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #result { display: none; margin-top: 18px; }
+  #result.on { display: block; }
+  .tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--line); margin: -4px -4px 16px; padding: 0 4px; }
+  .tab { background: none; border: 0; color: var(--muted); padding: 10px 12px; font: inherit; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .tab.on { color: var(--text); border-bottom-color: var(--accent); }
+  .panel { display: none; }
+  .panel.on { display: block; }
+  .summary { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .chip { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; letter-spacing: .02em; }
+  .chip.ok { background: rgba(47,191,113,.15); color: var(--ok); }
+  .chip.warn { background: rgba(240,165,49,.15); color: var(--warn); }
+  .chip.bad { background: rgba(239,91,91,.15); color: var(--bad); }
+  .chip.muted { background: var(--panel-2); color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .scroll { overflow-x: auto; }
+  pre { background: #07090d; border: 1px solid var(--line); border-radius: 10px; padding: 14px; overflow: auto; font: 13px/1.55 var(--mono); max-height: 520px; margin: 0; }
+  .mermaid-box { background: #fff; border-radius: 10px; padding: 12px; overflow-x: auto; }
+  .mermaid-box svg { max-width: 100%; height: auto; }
+  .muted { color: var(--muted); }
+  .total { font-size: 22px; font-weight: 700; }
+  .trace { list-style: none; margin: 0; padding: 0; }
+  .trace .chip { max-width: 140px; text-align: center; }
+  .trace li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); align-items: start; }
+  .trace .n { width: 24px; height: 24px; border-radius: 50%; background: var(--panel-2); display: grid; place-items: center; font-size: 12px; color: var(--muted); }
+  .hitl-box { margin-top: 16px; padding: 14px; border-radius: 10px; border: 1px solid rgba(240,165,49,.4); background: rgba(240,165,49,.06); }
+  .hidden { display: none !important; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 28px 0 12px; }
+  @media (max-width: 560px) {
+    .row { grid-template-columns: 1fr; }
+    .actions .btn { flex: 1 1 auto; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><span>Schemattiq</span></div>
+    <div class="badge"><span class="dot"></span><span><b id="statCount">0</b> hardware architectures verified today · Powered by AgenticOrg + Grantex</span></div>
+  </header>
+
+  <section class="card">
+    <h1>Describe a gadget. Get wiring, verified firmware and a governed BOM.</h1>
+    <p class="sub">A four-agent hardware company designs the circuit, compiles the firmware in a Render Sandbox, and prices the parts against your budget cap.</p>
+
+    <div class="pills" id="presets"></div>
+
+    <label for="idea">Your hardware idea</label>
+    <textarea id="idea" placeholder="e.g. A solar-powered soil moisture node that texts me when my plants need water"></textarea>
+    <div class="row">
+      <div>
+        <label for="budget">Budget cap (₹)</label>
+        <input id="budget" type="number" min="1" step="1" value="2500" inputmode="numeric">
+      </div>
+      <div>
+        <label for="phone">Phone for over-budget approval call (optional)</label>
+        <input id="phone" type="tel" placeholder="98765 43210" autocomplete="tel">
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="go">Design it</button>
+      <button class="btn secondary mic" id="mic" title="Speak your idea">🎙 Speak</button>
+      <button class="btn danger" id="simulate">Simulate ₹15,400 drone BOM (Grantex + Vobiz call)</button>
+    </div>
+    <div class="status" id="status" role="status" aria-live="polite"></div>
+
+    <div class="hitl-box hidden" id="hitlBox"></div>
+
+    <div class="progress" id="progress">
+      <div class="steps" id="steps"></div>
+    </div>
+  </section>
+
+  <section class="card" id="result">
+    <div class="summary">
+      <div>
+        <div class="muted" id="resMcu"></div>
+        <div class="total" id="resTotal"></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span class="chip" id="resPosture"></span>
+        <button class="btn secondary" id="speak">🔊 Hear summary</button>
+      </div>
+    </div>
+    <div class="tabs" role="tablist">
+      <button class="tab on" data-tab="wiring">Wiring &amp; pinout</button>
+      <button class="tab" data-tab="firmware">Sandbox-verified firmware</button>
+      <button class="tab" data-tab="bom">Governed BOM cart</button>
+      <button class="tab" data-tab="trace">AgenticOrg trace</button>
+    </div>
+    <div class="panel on" data-panel="wiring">
+      <div class="mermaid-box" id="diagram"></div>
+      <h3>GPIO map</h3>
+      <div class="scroll"><table id="pinTable"></table></div>
+    </div>
+    <div class="panel" data-panel="firmware">
+      <p><span class="chip" id="fwBadge"></span> <span class="muted" id="fwNote"></span></p>
+      <pre><code id="fwCode"></code></pre>
+    </div>
+    <div class="panel" data-panel="bom">
+      <div class="scroll"><table id="bomTable"></table></div>
+      <div class="summary" style="margin-top:14px">
+        <div><span class="muted">Grantex policy</span> <span class="chip" id="bomPosture"></span></div>
+        <a class="btn" id="checkout" href="#" target="_blank" rel="noopener">Proceed to Pine Labs checkout</a>
+      </div>
+    </div>
+    <div class="panel" data-panel="trace">
+      <ol class="trace" id="trace"></ol>
+    </div>
+  </section>
+
+  <footer>Schemattiq · AgenticOrg · Greptile · Render Workflows &amp; Sandboxes · ElevenLabs · Vobiz · Replit</footer>
+</div>
+
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "strict" });
+
+const API = (window.SCHEMATTIQ_API || "").replace(/\/$/, "");
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const inr = (n) => typeof n === "number" ? "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 }) : "—";
+
+let clientId;
+try { clientId = localStorage.getItem("sq_client") || crypto.randomUUID(); localStorage.setItem("sq_client", clientId); }
+catch { clientId = crypto.randomUUID(); }
+
+let config = { pinelabs_checkout_url: "" };
+let last = null;
+
+const PRESETS = [
+  { label: "Smart Chai Kettle Temp Controller", cap: 1200, idea: "Smart chai kettle temperature controller: DS18B20 waterproof probe, relay to cut the heater at 92°C, buzzer when chai is ready, and a small OLED showing temperature." },
+  { label: "BLDC Desk Gimbal Stabilizer", cap: 2800, idea: "Two-axis desk gimbal stabilizer for a phone using two gimbal BLDC motors with drivers and an MPU6050 IMU, USB-C powered." },
+  { label: "Autonomous Warehouse Gas Leak Rover", cap: 4500, hitl: true, idea: "Autonomous warehouse gas-leak rover: MQ-2 and MQ-135 gas sensors, 4WD chassis with L298N motor driver, ultrasonic obstacle avoidance, LoRa alerts and a buzzer beacon." },
+];
+$("presets").innerHTML = PRESETS.map((p, i) =>
+  `<button class="pill${p.hitl ? " hitl" : ""}" data-i="${i}">${esc(p.label)} <span class="cap">(Cap: ${inr(p.cap)}${p.hitl ? " — triggers HITL" : ""})</span></button>`).join("");
+$("presets").addEventListener("click", (e) => {
+  const b = e.target.closest(".pill"); if (!b) return;
+  const p = PRESETS[+b.dataset.i];
+  $("idea").value = p.idea; $("budget").value = p.cap;
+  design();
+});
+
+function setStatus(msg, err = false) { $("status").textContent = msg; $("status").classList.toggle("err", err); }
+
+async function api(path, opts = {}) {
+  const r = await fetch(API + path, opts);
+  if (!r.ok) {
+    let detail = r.statusText;
+    try { const j = await r.json(); detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail); } catch {}
+    throw new Error(detail);
+  }
+  return r;
+}
+
+async function refreshStats() {
+  try { const s = await (await api("/api/stats")).json(); $("statCount").textContent = s.verified_today ?? 0; } catch {}
+}
+async function loadConfig() {
+  try { config = await (await api("/api/config")).json(); } catch {}
+  if (config.voice_enabled === false) $("mic").classList.add("hidden");
+}
+
+// --- progress animation while the workflow runs ---------------------------
+const STEPS = ["Greptile: grounding pinouts", "Rohan_Firmware_Lead: designing circuit + firmware",
+  "Render Sandbox: compiling firmware", "Meera_BOM_Buyer: pricing Indian BOM", "Priya_CFO_Guard: Grantex spend gate"];
+let stepTimer;
+function startProgress() {
+  $("progress").classList.add("on");
+  $("steps").innerHTML = STEPS.map((s) => `<div class="step"><span class="ic"></span>${esc(s)}</div>`).join("");
+  const els = [...$("steps").children]; let i = 0;
+  els[0].classList.add("active");
+  stepTimer = setInterval(() => {
+    if (i < els.length - 1) { els[i].classList.replace("active", "done"); els[++i].classList.add("active"); }
+  }, 9000);
+}
+function stopProgress() { clearInterval(stepTimer); $("progress").classList.remove("on"); }
+
+// --- design ---------------------------------------------------------------
+async function design() {
+  const idea = $("idea").value.trim(), budget = parseInt($("budget").value, 10);
+  if (idea.length < 3) return setStatus("Describe your gadget first.", true);
+  if (!(budget > 0)) return setStatus("Set a budget cap in rupees.", true);
+  $("go").disabled = true; $("result").classList.remove("on"); $("hitlBox").classList.add("hidden");
+  setStatus("Your virtual hardware company is on it — this takes about a minute.");
+  startProgress();
+  try {
+    const r = await api("/api/design", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idea, budget_inr: budget, phone: $("phone").value.trim(), client_id: clientId }),
+    });
+    last = await r.json();
+    render(last);
+    setStatus("");
+    if (last.hitl) showHitl(last.hitl);
+    refreshStats();
+  } catch (e) {
+    setStatus("Design failed: " + e.message, true);
+  } finally {
+    stopProgress(); $("go").disabled = false;
+  }
+}
+$("go").addEventListener("click", design);
+
+function postureChip(el, posture) {
+  const p = String(posture || "UNKNOWN");
+  el.textContent = p.replaceAll("_", " ");
+  el.className = "chip " + (p.startsWith("APPROVED") ? "ok" : p.startsWith("HITL") ? "warn" : "muted");
+}
+
+function render({ result }) {
+  const d = result.design || {}, sb = result.sandbox_verification || {}, bom = result.bom || {};
+  $("resMcu").textContent = d.mcu ? `MCU: ${d.mcu}` : "";
+  $("resTotal").textContent = `${inr(result.total_inr)} of ${inr(result.budget_inr)} budget`;
+  postureChip($("resPosture"), result.grantex_posture);
+  postureChip($("bomPosture"), result.grantex_posture);
+
+  // Wiring
+  const box = $("diagram");
+  if (d.mermaid_wiring_diagram) {
+    const src = String(d.mermaid_wiring_diagram).replace(/^```(?:mermaid)?\s*|```\s*$/g, "");
+    mermaid.render("wiring" + Date.now(), src).then(({ svg }) => { box.innerHTML = svg; })
+      .catch(() => { box.innerHTML = `<pre>${esc(src)}</pre>`; });
+  } else box.innerHTML = `<p class="muted" style="color:#555">No wiring diagram returned.</p>`;
+  const comps = Array.isArray(d.components) ? d.components : [];
+  const rows = comps.flatMap((c) => {
+    const pm = c.pin_mapping;
+    if (pm && typeof pm === "object") return Object.entries(pm).map(([sig, pin]) => [c.name, sig, pin]);
+    return [[c.name, "", pm ?? ""]];
+  });
+  $("pinTable").innerHTML = rows.length
+    ? `<tr><th>Component</th><th>Signal</th><th>GPIO</th></tr>` + rows.map((r) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td></tr>`).join("")
+    : `<tr><td class="muted">No pin mapping returned.</td></tr>`;
+
+  // Firmware
+  const fw = $("fwBadge");
+  const label = { ok: "✓ Compiled in Render Sandbox", missing_library: "Syntax OK up to a missing library", syntax_error: "✗ Compile errors", no_toolchain: "Toolchain unavailable" }[sb.status] || "Not verified";
+  fw.textContent = label;
+  fw.className = "chip " + (sb.status === "ok" ? "ok" : sb.status === "syntax_error" ? "bad" : "warn");
+  $("fwNote").textContent = sb.missing_headers?.length ? `Needs: ${sb.missing_headers.join(", ")}` : (sb.sandbox_id ? `Sandbox ${sb.sandbox_id}` : "");
+  $("fwCode").textContent = d.firmware_code || "";
+
+  // BOM
+  const items = bom.line_items || comps;
+  $("bomTable").innerHTML = items.length
+    ? `<tr><th>Part</th><th>Vendor / SKU</th><th>HSN</th><th>Qty</th><th class="num">Unit</th><th class="num">Line</th></tr>` +
+      items.map((it) => {
+        const unit = it.unit_inr ?? it.est_inr, qty = it.qty ?? 1;
+        return `<tr><td>${esc(it.name)}</td><td>${esc([it.vendor, it.sku].filter(Boolean).join(" · ") || "—")}</td><td>${esc(it.hsn || "—")}</td><td>${esc(qty)}</td><td class="num">${inr(unit)}</td><td class="num">${typeof unit === "number" ? inr(unit * qty) : "—"}</td></tr>`;
+      }).join("") + `<tr><td colspan="5"><b>Total (GST incl.)</b></td><td class="num"><b>${inr(result.total_inr)}</b></td></tr>`
+    : `<tr><td class="muted">No BOM returned.</td></tr>`;
+  const approved = String(result.grantex_posture).startsWith("APPROVED");
+  const co = $("checkout");
+  if (approved && config.pinelabs_checkout_url) { co.href = config.pinelabs_checkout_url; co.removeAttribute("aria-disabled"); co.style.opacity = 1; co.textContent = "Proceed to Pine Labs checkout"; }
+  else { co.removeAttribute("href"); co.setAttribute("aria-disabled", "true"); co.style.opacity = .5; co.textContent = approved ? "Checkout link not configured" : "Checkout blocked by Grantex"; }
+
+  // Trace
+  $("trace").innerHTML = (result.trace || []).map((t, i) =>
+    `<li><span class="n">${i + 1}</span><div><b>${esc(t.agent)}</b><div class="muted">${esc(t.step)}${t.total_inr != null ? " · " + inr(t.total_inr) : ""}</div></div><span class="chip muted">${esc(String(t.status ?? "").replaceAll("_", " "))}</span></li>`).join("");
+
+  $("result").classList.add("on");
+  $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+document.querySelector(".tabs").addEventListener("click", (e) => {
+  const t = e.target.closest(".tab"); if (!t) return;
+  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("on", x === t));
+  document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("on", p.dataset.panel === t.dataset.tab));
+});
+
+// --- ElevenLabs: spoken summary ------------------------------------------
+$("speak").addEventListener("click", async () => {
+  if (!last) return;
+  $("speak").disabled = true;
+  try {
+    const r = await api("/api/voice-summary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: last.session_id }) });
+    const audio = new Audio(URL.createObjectURL(await r.blob()));
+    await audio.play();
+  } catch (e) { setStatus("Voice summary failed: " + e.message, true); }
+  finally { $("speak").disabled = false; }
+});
+
+// --- ElevenLabs: voice-to-spec -------------------------------------------
+let rec, chunks = [];
+$("mic").addEventListener("click", async () => {
+  if (rec && rec.state === "recording") { rec.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    rec = new MediaRecorder(stream); chunks = [];
+    rec.ondataavailable = (e) => chunks.push(e.data);
+    rec.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      $("mic").classList.remove("rec"); $("mic").textContent = "🎙 Speak";
+      setStatus("Transcribing…");
+      const fd = new FormData(); fd.append("audio", new Blob(chunks, { type: rec.mimeType }), "idea.webm");
+      try { const { text } = await (await api("/api/transcribe", { method: "POST", body: fd })).json(); $("idea").value = text; setStatus(""); }
+      catch (e) { setStatus("Transcription failed: " + e.message, true); }
+    };
+    rec.start();
+    $("mic").classList.add("rec"); $("mic").textContent = "■ Stop";
+    setStatus("Listening… tap Stop when done.");
+  } catch { setStatus("Microphone access was blocked.", true); }
+});
+
+// --- Vobiz HITL ------------------------------------------------------------
+let hitlTimer;
+function showHitl(h) {
+  const box = $("hitlBox"); box.classList.remove("hidden");
+  const msg = {
+    CALLING: "📞 Calling the approver now — press 1 on the call to approve the Grantex override.",
+    HITL_REQUIRED: "Grantex blocked checkout. Approval is waiting in the AgenticOrg HITL queue.",
+    CALL_FAILED: "Grantex blocked checkout. The approval call could not be placed: ",
+    APPROVED: "✅ Approved by phone (DTMF 1). Grantex override recorded — Pine Labs payment link released.",
+    REJECTED: "❌ Rejected by phone. Checkout stays blocked.",
+    NO_ANSWER: "No answer. Checkout stays blocked.",
+  }[h.status] || h.status;
+  box.innerHTML = `<b>Grantex: ${esc(h.status.replaceAll("_", " "))}</b><div>${esc(msg)}${h.status === "CALL_FAILED" ? esc(h.detail || "") : ""}</div>`;
+  clearInterval(hitlTimer);
+  if (["CALLING", "HITL_REQUIRED"].includes(h.status)) {
+    hitlTimer = setInterval(async () => {
+      try { const n = await (await api(`/api/hitl/${h.id}`)).json(); if (n.status !== h.status) showHitl(n); } catch {}
+    }, 2500);
+  }
+}
+$("simulate").addEventListener("click", async () => {
+  $("simulate").disabled = true;
+  setStatus("Engineering requested a ₹15,400 drone BOM against a ₹10,000 policy…");
+  try {
+    const r = await (await api("/api/hitl/simulate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone: $("phone").value.trim() }) })).json();
+    setStatus("");
+    showHitl(r.hitl);
+  } catch (e) { setStatus("Simulation failed: " + e.message, true); }
+  finally { $("simulate").disabled = false; }
+});
+
+loadConfig(); refreshStats(); setInterval(refreshStats, 30000);
+</script>
+</body>
+</html>

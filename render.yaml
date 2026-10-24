@@ -8,12 +8,32 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
+    disk:
+      name: schemattiq-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
-      - key: RENDER_API_KEY
-        sync: false
       - key: PIPELINE_TASK_SLUG
         value: schemattiq-workflow/schemattiq_pipeline
       - key: CORS_ORIGINS
         value: "*"
+      - key: DB_PATH
+        value: /var/data/schemattiq.db
+      - key: VOBIZ_CALL_THRESHOLD_INR
+        value: "5000"
+      - key: RENDER_API_KEY
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: VOBIZ_AUTH_ID
+        sync: false
+      - key: VOBIZ_AUTH_TOKEN
+        sync: false
+      - key: VOBIZ_FROM_NUMBER
+        sync: false
+      - key: PINELABS_CHECKOUT_URL
+        sync: false

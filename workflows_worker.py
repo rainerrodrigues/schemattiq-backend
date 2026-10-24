@@ -12,6 +12,7 @@ Run on Render as a Workflow with start command:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import tempfile
@@ -30,6 +31,8 @@ app = Workflows()
 ROHAN_AGENT = os.getenv("ROHAN_AGENT_ID", "Rohan_Firmware_Lead")
 MEERA_AGENT = os.getenv("MEERA_AGENT_ID", "Meera_BOM_Buyer")
 BOM_MERCHANT_ID = os.getenv("BOM_MERCHANT_ID", "schemattiq_india_bom")
+# Priya_CFO_Guard: how many times an over-budget cart goes back to Meera for swaps.
+MAX_REQUOTES = int(os.getenv("MAX_REQUOTES", "1"))
 
 STUBS_DIR = Path(__file__).parent / "sandbox_stubs"
 FALLBACK_FIRMWARE = "void setup() {}\nvoid loop() {}\n"
@@ -56,22 +59,56 @@ def _agent_summary(result: AgentRunResult) -> dict:
     return d
 
 
-def _extract_firmware(output: dict) -> str:
-    for key in ("firmware_stub", "firmware_code", "firmware", "code"):
-        value = output.get(key)
+def _agent_json(output: dict) -> dict:
+    """Agents are prompted for strict JSON, but it may arrive as a string field
+    (often fenced in ```json). Return the parsed object, else the output as-is."""
+    if any(k in output for k in ("firmware_code", "components", "total_inr")):
+        return output
+    for value in output.values():
+        if isinstance(value, str) and "{" in value:
+            fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", value, re.S)
+            text = fenced.group(1) if fenced else value[value.find("{"): value.rfind("}") + 1]
+            try:
+                parsed = json.loads(text)
+            except ValueError:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+    return output
+
+
+def _extract_firmware(spec: dict) -> str:
+    for key in ("firmware_code", "firmware_stub", "firmware", "code"):
+        value = spec.get(key)
         if isinstance(value, str) and value.strip():
             return value
     return FALLBACK_FIRMWARE
 
 
+def _is_hdl(code: str) -> bool:
+    return bool(re.search(r"^\s*module\s+\w+", code, re.M) and "endmodule" in code)
+
+
+def _total_inr(cart: dict) -> float | None:
+    total = cart.get("total_inr")
+    if isinstance(total, str):
+        try:
+            total = float(total.replace(",", "").replace("₹", "").strip())
+        except ValueError:
+            return None
+    return total if isinstance(total, (int, float)) else None
+
+
 @app.task(name="verify_firmware_in_sandbox", timeout_seconds=180)
 async def verify_firmware_in_sandbox(ctx: TaskContext, firmware_code: str) -> dict:
-    """Syntax-check generated firmware with g++ inside a Render Sandbox.
+    """Syntax-check generated firmware inside a Render Sandbox.
 
-    Arduino.h/Wire.h are stubbed so plain sketches compile. Third-party library
-    headers can't be resolved, so those are reported as `missing_library`
-    rather than as a syntax error.
+    C++: g++ -fsyntax-only with Arduino/Wire/SPI stubbed so plain sketches
+    compile. Third-party library headers can't be resolved, so those are
+    reported as `missing_library` rather than as a syntax error.
+    SystemVerilog: iverilog -g2012 (or verilator --lint-only) if installed.
     """
+    hdl = _is_hdl(firmware_code)
     sandboxes = RenderAsync().experimental.sandboxes
     sb = await sandboxes.create(timeout_seconds=300)
     try:
@@ -79,15 +116,22 @@ async def verify_firmware_in_sandbox(ctx: TaskContext, firmware_code: str) -> di
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp) / "fw"
             (work / "stubs").mkdir(parents=True)
-            (work / "main.cpp").write_text(firmware_code, encoding="utf-8")
+            (work / ("main.sv" if hdl else "main.cpp")).write_text(firmware_code, encoding="utf-8")
             for stub in STUBS_DIR.glob("*.h"):
                 (work / "stubs" / stub.name).write_text(stub.read_text(encoding="utf-8"), encoding="utf-8")
             await sandboxes.copy_to(sb.id, work, "fw")
 
-        cmd = (
-            "cd ~/fw && command -v g++ >/dev/null || { echo 'NO_TOOLCHAIN'; exit 127; }; "
-            "g++ -std=gnu++17 -fsyntax-only -Wall -I stubs -x c++ main.cpp 2>&1"
-        )
+        if hdl:
+            cmd = (
+                "cd ~/fw && if command -v iverilog >/dev/null; then iverilog -g2012 -o /dev/null main.sv 2>&1; "
+                "elif command -v verilator >/dev/null; then verilator --lint-only -Wno-fatal main.sv 2>&1; "
+                "else echo 'NO_TOOLCHAIN'; exit 127; fi"
+            )
+        else:
+            cmd = (
+                "cd ~/fw && command -v g++ >/dev/null || { echo 'NO_TOOLCHAIN'; exit 127; }; "
+                "g++ -std=gnu++17 -fsyntax-only -Wall -I stubs -x c++ main.cpp 2>&1"
+            )
         chunks, exit_code = [], None
         async for event in sandboxes.exec(sb.id, cmd):
             if isinstance(event, SandboxExecOutput):
@@ -109,6 +153,7 @@ async def verify_firmware_in_sandbox(ctx: TaskContext, firmware_code: str) -> di
         status = "syntax_error"
     return {
         "sandbox_id": sb.id,
+        "language": "systemverilog" if hdl else "cpp",
         "verified": status == "ok",
         "status": status,
         "exit_code": exit_code,
@@ -133,35 +178,69 @@ async def schemattiq_pipeline(ctx: TaskContext, idea: str, budget_inr: int, phon
         "prompt": idea, "greptile_context": hw_context, "budget_inr": budget_inr,
     })
 
+    spec = _agent_json(arch.output)
+
     # 3. Chained task on its own compute: compile-check in a Render Sandbox.
-    sandbox_check = await ctx.run(verify_firmware_in_sandbox, _extract_firmware(arch.output))
+    sandbox_check = await ctx.run(verify_firmware_in_sandbox, _extract_firmware(spec))
 
     # 4. Meera: OACP buyer discovery for the BOM.
-    commerce = await _run_agent(MEERA_AGENT, "buyer_discovery_preview", {
-        "merchant_id": BOM_MERCHANT_ID, "design": arch.output, "max_budget_inr": budget_inr,
-    })
+    buyer_inputs = {"merchant_id": BOM_MERCHANT_ID, "design": spec, "max_budget_inr": budget_inr}
+    commerce = await _run_agent(MEERA_AGENT, "buyer_discovery_preview", buyer_inputs)
+    cart = _agent_json(commerce.output)
+    total = _total_inr(cart)
 
-    # 5. Grantex spend posture. A missing total is escalated, never auto-approved.
-    total = commerce.output.get("total_inr")
-    if not isinstance(total, (int, float)):
+    # 5. Priya_CFO_Guard policy: over the cap -> back to Meera for cheaper
+    #    drop-in swaps (MAX_REQUOTES times), then HITL. A missing total is
+    #    escalated, never auto-approved.
+    requotes = []
+    while total is not None and total > budget_inr and len(requotes) < MAX_REQUOTES:
+        requotes.append({"total_inr": total, "cart": cart})
+        commerce = await _run_agent(MEERA_AGENT, "buyer_discovery_preview", {
+            **buyer_inputs,
+            "previous_cart": cart,
+            "requote_reason": f"Over budget by ₹{total - budget_inr:.0f}. Swap to cheaper "
+                              "drop-in parts with the same pin mapping and interface.",
+        })
+        cart = _agent_json(commerce.output)
+        total = _total_inr(cart)
+
+    if total is None:
         grantex_status = "HITL_ESCALATED_UNKNOWN_COST"
     elif total <= budget_inr:
-        grantex_status = "APPROVED"
+        grantex_status = "APPROVED_AFTER_SWAP" if requotes else "APPROVED"
     else:
         grantex_status = "HITL_ESCALATED_OVER_BUDGET"
 
-    # 6. Vobiz voice HITL call is wired in Step 4; flag whether it should fire.
-    needs_call = grantex_status != "APPROVED" and bool(phone) and bool(os.getenv("VOBIZ_AUTH_ID"))
-
+    # 6. The web service (api.py) places the Vobiz HITL call, since it also
+    #    hosts the call's webhooks. `phone` stays unused here so numbers don't
+    #    land in workflow logs.
     return {
         "hardware_context_source": hw_source,
+        "design": {
+            "mcu": spec.get("mcu"),
+            "components": spec.get("components", []),
+            "mermaid_wiring_diagram": spec.get("mermaid_wiring_diagram"),
+            "firmware_code": _extract_firmware(spec),
+        },
         "architecture": _agent_summary(arch),
         "sandbox_verification": sandbox_check,
+        "bom": cart,
         "oacp_bom_cart": _agent_summary(commerce),
+        "requotes": requotes,
         "total_inr": total,
         "budget_inr": budget_inr,
         "grantex_posture": grantex_status,
-        "vobiz_hitl_called": needs_call,
+        "hitl_required": grantex_status.startswith("HITL"),
+        "trace": [
+            {"agent": "Greptile", "step": "hardware ground truth", "status": hw_source.split(" ")[0]},
+            {"agent": "Rohan_Firmware_Lead", "step": "design_hardware_spec", "status": arch.status},
+            {"agent": "Render Sandbox", "step": "firmware syntax check", "status": sandbox_check.get("status")},
+            *({"agent": "Meera_BOM_Buyer", "step": "buyer_discovery_preview", "status": "re-quote requested",
+               "total_inr": q["total_inr"]} for q in requotes),
+            {"agent": "Meera_BOM_Buyer", "step": "buyer_discovery_preview", "status": commerce.status,
+             "total_inr": total},
+            {"agent": "Priya_CFO_Guard", "step": "Grantex spend gate", "status": grantex_status},
+        ],
     }
 
 

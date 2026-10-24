@@ -1,0 +1,5 @@
+name,role,domain,reports_to
+Vikram_VP_Eng,ops_head,operations,
+Rohan_Firmware_Lead,custom_architect,operations,Vikram_VP_Eng
+Priya_CFO_Guard,fpa_agent,finance,
+Meera_BOM_Buyer,commerce_sales_agent,finance,Priya_CFO_Guard

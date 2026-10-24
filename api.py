@@ -215,3 +215,8 @@ async def vobiz_hangup(request: Request) -> Response:
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(FRONTEND)
+
+
+@app.get("/config.js")
+async def frontend_config() -> FileResponse:
+    return FileResponse(FRONTEND.with_name("config.js"), media_type="application/javascript")

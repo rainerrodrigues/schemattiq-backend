@@ -60,9 +60,13 @@ api.py → Vobiz POST /Account/{id}/Call/ → /vobiz/answer (Speak + Gather) →
    - Env: AgenticOrg, Greptile and Render variables from `.env.example`
 3. **Render Web Service**: Dashboard → New → Blueprint with this repo (`render.yaml`).
    Fill in the `sync: false` variables. Set `PUBLIC_BASE_URL` to the service's own URL.
-4. **Replit frontend**: create an HTML/CSS/JS Repl, paste `frontend/index.html`, and
-   set `window.SCHEMATTIQ_API` at the top to the web service URL. The web service
-   also serves the same page at `/`, so it works there as a fallback.
+4. **Replit frontend**: Replit → **Create App** → **Import from GitHub** → this repo.
+   `.replit` serves only `frontend/` (no Python dependencies are installed).
+   - Edit `frontend/config.js` in Replit: `window.SCHEMATTIQ_API = "https://<your-service>.onrender.com";`
+   - Click **Run** to preview, then **Deploy → Static** (public directory `frontend`).
+   - Optionally set `CORS_ORIGINS` on the Render web service to your Replit URL instead of `*`.
+
+   The Render web service also serves the same page at `/`, as a fallback.
 
 ## Local dev
 

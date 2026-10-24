@@ -1,0 +1,11 @@
+# Replit: serve only the frontend. The API runs on Render (see README).
+modules = ["python-3.11"]
+run = "python3 -m http.server 8080 --bind 0.0.0.0 --directory frontend"
+
+[[ports]]
+localPort = 8080
+externalPort = 80
+
+[deployment]
+deploymentTarget = "static"
+publicDir = "frontend"

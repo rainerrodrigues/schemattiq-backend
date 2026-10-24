@@ -91,7 +91,7 @@ async def _start_hitl_call(title: str, total: float, budget: float, phone: str,
                            session_id: str | None = None) -> dict:
     hid = store.create_hitl(title, total, budget, phone, session_id)
     if not phone:
-        return {"id": hid, "status": "HITL_REQUIRED", "detail": "No phone number given; approve in AgenticOrg."}
+        return {"id": hid, "status": "HITL_REQUIRED", "detail": "No phone number given, so no approval call was placed."}
     try:
         call = await vobiz.place_approval_call(phone, hid)
     except vobiz.VobizError as e:
